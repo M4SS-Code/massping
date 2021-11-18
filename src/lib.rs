@@ -114,6 +114,7 @@ pub fn ping_v4(
         }
     });
 
+    let mut sent_count = 0;
     let mut sent = BTreeMap::default();
 
     let mut packet_vec = vec![0u8; usize::from(size)];
@@ -124,7 +125,9 @@ pub fn ping_v4(
         packet.set_icmp_type(IcmpTypes::EchoRequest);
         packet.set_checksum(util::checksum(packet.packet(), 1));
 
-        raw_tx.send_to(packet, IpAddr::V4(addr))?;
+        if raw_tx.send_to(packet, IpAddr::V4(addr)).is_ok() {
+            sent_count += 1;
+        }
 
         let now = Instant::now();
         sent.insert(addr, now);
@@ -146,7 +149,7 @@ pub fn ping_v4(
                     *space = Some(took);
                     received_count += 1;
 
-                    if received_count == sent.len() {
+                    if received_count == sent_count {
                         break;
                     }
                 }
@@ -189,6 +192,7 @@ pub fn ping_v6(
         }
     });
 
+    let mut sent_count = 0;
     let mut sent = BTreeMap::default();
 
     let mut packet_vec = vec![0u8; usize::from(size)];
@@ -197,7 +201,9 @@ pub fn ping_v6(
         packet.set_icmpv6_type(Icmpv6Types::EchoRequest);
         packet.set_checksum(util::checksum(packet.packet(), 1));
 
-        raw_tx.send_to(packet, IpAddr::V6(addr))?;
+        if raw_tx.send_to(packet, IpAddr::V6(addr)).is_ok() {
+            sent_count += 1;
+        }
 
         let now = Instant::now();
         sent.insert(addr, now);
@@ -219,7 +225,7 @@ pub fn ping_v6(
                     *space = Some(took);
                     received_count += 1;
 
-                    if received_count == sent.len() {
+                    if received_count == sent_count {
                         break;
                     }
                 }
