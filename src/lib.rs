@@ -237,6 +237,8 @@ pub fn ping_v6(
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use super::*;
 
     #[tokio::test]
@@ -251,8 +253,11 @@ mod tests {
         let pings = ping_v4(addrs, rtt, size).unwrap();
         assert_eq!(pings.len(), 3);
         assert!(pings.get(&localhost).unwrap().unwrap() < Duration::from_secs(1));
-        assert!(pings.get(&one_one_one_one).unwrap().unwrap() < rtt);
-        assert!(pings.get(&not_answering).unwrap().is_none());
+        // GitHub Actions doesn't support ping
+        if env::var("CI").is_err() {
+            assert!(pings.get(&one_one_one_one).unwrap().unwrap() < rtt);
+            assert!(pings.get(&not_answering).unwrap().is_none());
+        }
     }
 
     #[tokio::test]
@@ -266,7 +271,10 @@ mod tests {
         let pings = ping_v6(addrs, rtt, size).unwrap();
         assert_eq!(pings.len(), 2);
         assert!(pings.get(&localhost).unwrap().unwrap() < Duration::from_secs(1));
-        assert!(pings.get(&one_one_one_one).unwrap().unwrap() < rtt);
+        // GitHub Actions doesn't support ping
+        if env::var("CI").is_err() {
+            assert!(pings.get(&one_one_one_one).unwrap().unwrap() < rtt);
+        }
     }
 
     #[tokio::test]
@@ -289,9 +297,13 @@ mod tests {
         let pings = ping(addrs, rtt, size).await.unwrap();
         assert_eq!(pings.len(), 5);
         assert!(pings.get(&localhost_v4).unwrap().unwrap() < Duration::from_secs(1));
-        assert!(pings.get(&one_one_one_one_v4).unwrap().unwrap() < rtt);
         assert!(pings.get(&not_answering_v4).unwrap().is_none());
         assert!(pings.get(&localhost_v6).unwrap().unwrap() < Duration::from_secs(1));
-        assert!(pings.get(&one_one_one_one_v6).unwrap().unwrap() < rtt);
+
+        // GitHub Actions doesn't support ping
+        if env::var("CI").is_err() {
+            assert!(pings.get(&one_one_one_one_v4).unwrap().unwrap() < rtt);
+            assert!(pings.get(&one_one_one_one_v6).unwrap().unwrap() < rtt);
+        }
     }
 }
