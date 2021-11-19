@@ -66,4 +66,4 @@ jobs:
 
       - run: sudo $HOME/.cargo/bin/rustup default ${{ matrix.rust }}
 
-      - run: sudo env "PATH=$PATH" $HOME/.cargo/bin/cargo test
+      - run: sudo env "PATH=$PATH" CI=1 $HOME/.cargo/bin/cargo test
