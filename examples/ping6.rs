@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use fastping_rs::ping_v6;
+use massping::ping_v6;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {

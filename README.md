@@ -1,4 +1,4 @@
-# fastping-rs
+# massping
 
 A simplified version of [fastping-rs](https://github.com/bparli/fastping-rs)
 without some of its [issues](https://github.com/bparli/fastping-rs/issues/25).
