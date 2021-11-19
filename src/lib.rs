@@ -142,7 +142,7 @@ pub fn ping_v4(
         .collect::<BTreeMap<_, _>>();
     for (ip, received_at) in rx.into_iter() {
         if let Some(sent_at) = sent.get_mut(&ip) {
-            let took = received_at - *sent_at;
+            let took = received_at.saturating_duration_since(*sent_at);
 
             if let Some(space) = received.get_mut(&ip) {
                 if space.is_none() {
@@ -218,7 +218,7 @@ pub fn ping_v6(
         .collect::<BTreeMap<_, _>>();
     for (ip, received_at) in rx.into_iter() {
         if let Some(sent_at) = sent.get_mut(&ip) {
-            let took = received_at - *sent_at;
+            let took = received_at.saturating_duration_since(*sent_at);
 
             if let Some(space) = received.get_mut(&ip) {
                 if space.is_none() {
