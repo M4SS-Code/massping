@@ -4,8 +4,11 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "ICMP ping library for sending batches of ICMP echo request packets and measuring the roundtrip time"
+keywords = ["icmp", "ping"]
+categories = ["network-programming"]
 repository = "https://github.com/M4SS-Code/massping"
 readme = "README.md"
+rust-version = "1.56"
 
 [dependencies]
 pnet = "0.28"
