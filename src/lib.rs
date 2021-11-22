@@ -6,22 +6,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use pnet::{
-    packet::{
-        icmp::{
-            echo_reply::EchoReplyPacket, echo_request::MutableEchoRequestPacket, IcmpType,
-            IcmpTypes,
-        },
-        icmpv6::Icmpv6Type,
-        icmpv6::{Icmpv6Types, MutableIcmpv6Packet},
-        ip::IpNextHeaderProtocols,
-        Packet,
+use pnet_packet::{
+    icmp::{
+        echo_reply::EchoReplyPacket, echo_request::MutableEchoRequestPacket, IcmpType, IcmpTypes,
     },
-    transport::{
-        icmp_packet_iter, icmpv6_packet_iter, transport_channel, TransportChannelType,
-        TransportProtocol,
-    },
-    util,
+    icmpv6::Icmpv6Type,
+    icmpv6::{Icmpv6Types, MutableIcmpv6Packet},
+    ip::IpNextHeaderProtocols,
+    util, Packet,
+};
+use pnet_transport::{
+    icmp_packet_iter, icmpv6_packet_iter, transport_channel, TransportChannelType,
+    TransportProtocol,
 };
 use tokio::task;
 
