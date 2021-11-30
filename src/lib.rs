@@ -1,3 +1,14 @@
+//! A simplified version of [fastping-rs](https://github.com/bparli/fastping-rs)
+//! without some of its [issues](https://github.com/bparli/fastping-rs/issues/25).
+//!
+//! Depends on the tokio 1 runtime.
+//!
+//! Tested on: Linux
+//!
+//! As with the original version, this one also requires to create raw sockets,
+//! so the permission must either be explicitly set
+//! (`sudo setcap cap_net_raw=eip /path/to/binary` for example) or be run as root.
+
 use std::{
     collections::BTreeMap,
     io,
@@ -21,6 +32,9 @@ use pnet_transport::{
 };
 use tokio::task;
 
+/// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
+///
+/// Requires to be run inside the `tokio` 1 context.
 pub async fn ping(
     addrs: &[IpAddr],
     rtt: Duration,
@@ -75,6 +89,11 @@ pub async fn ping(
     Ok(received)
 }
 
+/// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
+///
+/// NOTE: this function blocks the current thread for up to `rtt`.
+///
+/// Requires to be run inside the `tokio` 1 context.
 pub fn ping_v4(
     addrs: impl Iterator<Item = Ipv4Addr>,
     rtt: Duration,
@@ -155,6 +174,11 @@ pub fn ping_v4(
     Ok(received)
 }
 
+/// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
+///
+/// NOTE: this function blocks the current thread for up to `rtt`.
+///
+/// Requires to be run inside the `tokio` 1 context.
 pub fn ping_v6(
     addrs: impl Iterator<Item = Ipv6Addr>,
     rtt: Duration,
