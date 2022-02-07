@@ -1,6 +1,6 @@
 [package]
 name = "massping"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 license = "MIT"
 description = "ICMP ping library for sending batches of ICMP echo request packets and measuring the roundtrip time"
