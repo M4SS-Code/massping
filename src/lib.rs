@@ -28,37 +28,31 @@ use tokio::task;
 ///
 /// Requires to be run inside the `tokio` 1 context.
 pub async fn ping(
-    addrs: &[IpAddr],
+    addrs: impl Iterator<Item = IpAddr>,
     rtt: Duration,
     size: u16,
 ) -> io::Result<BTreeMap<IpAddr, Option<Duration>>> {
     let mut received = BTreeMap::new();
 
-    let received4 = addrs.iter().any(|addr| addr.is_ipv4()).then(|| {
-        let v4 = addrs
-            .iter()
-            .copied()
-            .filter_map(|ip| match ip {
-                IpAddr::V4(v4) => Some(v4),
-                IpAddr::V6(_v6) => None,
-            })
-            .collect::<Vec<_>>();
+    let mut v4s = Vec::new();
+    let mut v6s = Vec::new();
 
-        task::spawn_blocking(move || ping_v4(v4.into_iter(), rtt, size))
-    });
+    for addr in addrs {
+        match addr {
+            IpAddr::V4(v4) => {
+                v4s.push(v4);
+            }
+            IpAddr::V6(v6) => {
+                v6s.push(v6);
+            }
+        }
+    }
 
-    let received6 = addrs.iter().any(|addr| addr.is_ipv6()).then(|| {
-        let v6 = addrs
-            .iter()
-            .copied()
-            .filter_map(|ip| match ip {
-                IpAddr::V6(v6) => Some(v6),
-                IpAddr::V4(_v4) => None,
-            })
-            .collect::<Vec<_>>();
+    let received4 = (!v4s.is_empty())
+        .then(|| task::spawn_blocking(move || ping_v4(v4s.into_iter(), rtt, size)));
 
-        task::spawn_blocking(move || ping_v6(v6.into_iter(), rtt, size))
-    });
+    let received6 = (!v6s.is_empty())
+        .then(|| task::spawn_blocking(move || ping_v6(v6s.into_iter(), rtt, size)));
 
     if let Some(received4) = received4 {
         let received4 = received4.await??;
@@ -309,13 +303,14 @@ mod tests {
         let localhost_v6 = "::1".parse().unwrap();
         let one_one_one_one_v6 = "2606:4700:4700::1111".parse().unwrap();
 
-        let addrs = &[
+        let addrs = [
             localhost_v4,
             one_one_one_one_v4,
             not_answering_v4,
             localhost_v6,
             one_one_one_one_v6,
-        ];
+        ]
+        .into_iter();
         let rtt = Duration::from_secs(5);
         let size = 64;
         let pings = ping(addrs, rtt, size).await.unwrap();
