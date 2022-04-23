@@ -13,7 +13,6 @@ use std::{
     collections::BTreeMap,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::mpsc,
     time::{Duration, Instant},
 };
 
@@ -22,7 +21,7 @@ use pnet_transport::{
     icmp_packet_iter, icmpv6_packet_iter, transport_channel, TransportChannelType,
     TransportProtocol,
 };
-use tokio::task;
+use tokio::{sync::mpsc, task};
 
 /// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
 ///
@@ -48,40 +47,38 @@ pub async fn ping(
         }
     }
 
-    let received4 = (!v4s.is_empty())
-        .then(|| task::spawn_blocking(move || ping_v4(v4s.into_iter(), rtt, size)));
+    let received4 = (!v4s.is_empty()).then(|| ping_v4(v4s.into_iter(), rtt, size));
+    let received6 = (!v6s.is_empty()).then(|| ping_v6(v6s.into_iter(), rtt, size));
 
-    let received6 = (!v6s.is_empty())
-        .then(|| task::spawn_blocking(move || ping_v6(v6s.into_iter(), rtt, size)));
+    let (received4, received6) = match (received4, received6) {
+        (Some(received4), Some(received6)) => {
+            let (received4, received6) = tokio::join!(received4, received6);
+            (received4?, received6?)
+        }
+        (Some(received4), None) => (received4.await?, BTreeMap::new()),
+        (None, Some(received6)) => (BTreeMap::new(), received6.await?),
+        (None, None) => (BTreeMap::new(), BTreeMap::new()),
+    };
 
-    if let Some(received4) = received4 {
-        let received4 = received4.await??;
-        received.extend(
-            received4
-                .into_iter()
-                .map(|(v4, took)| (IpAddr::V4(v4), took)),
-        );
-    }
-
-    if let Some(received6) = received6 {
-        let received6 = received6.await??;
-        received.extend(
-            received6
-                .into_iter()
-                .map(|(v6, took)| (IpAddr::V6(v6), took)),
-        );
-    }
+    received.extend(
+        received4
+            .into_iter()
+            .map(|(v4, took)| (IpAddr::V4(v4), took)),
+    );
+    received.extend(
+        received6
+            .into_iter()
+            .map(|(v6, took)| (IpAddr::V6(v6), took)),
+    );
 
     Ok(received)
 }
 
 /// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
 ///
-/// NOTE: this function blocks the current thread for up to `rtt`.
-///
 /// Requires to be run inside the `tokio` 1 context.
-pub fn ping_v4(
-    addrs: impl Iterator<Item = Ipv4Addr>,
+pub async fn ping_v4(
+    addrs: impl Iterator<Item = Ipv4Addr> + Send + 'static,
     rtt: Duration,
     size: u16,
 ) -> io::Result<BTreeMap<Ipv4Addr, Option<Duration>>> {
@@ -92,7 +89,7 @@ pub fn ping_v4(
     let protocol =
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp));
     let (mut raw_tx, mut raw_rx) = transport_channel(4096, protocol)?;
-    let (tx, rx) = mpsc::channel::<(Ipv4Addr, Instant)>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<(Ipv4Addr, Instant)>();
 
     task::spawn_blocking(move || {
         let mut receiver = icmp_packet_iter(&mut raw_rx);
@@ -119,34 +116,39 @@ pub fn ping_v4(
         }
     });
 
-    let mut sent_count = 0;
-    let mut sent = BTreeMap::default();
+    let (sent_count, sent) = task::spawn_blocking(move || {
+        let mut sent_count = 0;
+        let mut sent = BTreeMap::default();
 
-    let mut packet_vec = vec![0u8; usize::from(size)];
-    for addr in addrs {
-        getrandom::getrandom(&mut packet_vec).unwrap();
+        let mut packet_vec = vec![0u8; usize::from(size)];
+        for addr in addrs {
+            getrandom::getrandom(&mut packet_vec).unwrap();
 
-        let mut packet = MutableEchoRequestPacket::new(&mut packet_vec).unwrap();
-        packet.set_sequence_number(1);
-        packet.set_identifier(1);
-        packet.set_icmp_type(IcmpTypes::EchoRequest);
-        packet.set_checksum(util::checksum(packet.packet(), 1));
+            let mut packet = MutableEchoRequestPacket::new(&mut packet_vec).unwrap();
+            packet.set_sequence_number(1);
+            packet.set_identifier(1);
+            packet.set_icmp_type(IcmpTypes::EchoRequest);
+            packet.set_checksum(util::checksum(packet.packet(), 1));
 
-        if raw_tx.send_to(packet, IpAddr::V4(addr)).is_ok() {
-            sent_count += 1;
+            if raw_tx.send_to(packet, IpAddr::V4(addr)).is_ok() {
+                sent_count += 1;
+            }
+
+            let now = Instant::now();
+            sent.insert(addr, now);
         }
 
-        let now = Instant::now();
-        sent.insert(addr, now);
-    }
+        (sent_count, sent)
+    })
+    .await?;
 
     let mut received_count = 0;
     let mut received = sent
         .keys()
         .map(|&ip| (ip, None))
         .collect::<BTreeMap<_, _>>();
-    for (ip, received_at) in rx.into_iter() {
-        if let Some(sent_at) = sent.get_mut(&ip) {
+    while let Some((ip, received_at)) = rx.recv().await {
+        if let Some(sent_at) = sent.get(&ip) {
             let took = received_at.saturating_duration_since(*sent_at);
 
             if let Some(space) = received.get_mut(&ip) {
@@ -166,11 +168,9 @@ pub fn ping_v4(
 
 /// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
 ///
-/// NOTE: this function blocks the current thread for up to `rtt`.
-///
 /// Requires to be run inside the `tokio` 1 context.
-pub fn ping_v6(
-    addrs: impl Iterator<Item = Ipv6Addr>,
+pub async fn ping_v6(
+    addrs: impl Iterator<Item = Ipv6Addr> + Send + 'static,
     rtt: Duration,
     size: u16,
 ) -> io::Result<BTreeMap<Ipv6Addr, Option<Duration>>> {
@@ -181,7 +181,7 @@ pub fn ping_v6(
     let protocol =
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Icmpv6));
     let (mut raw_tx, mut raw_rx) = transport_channel(4096, protocol)?;
-    let (tx, rx) = mpsc::channel::<(Ipv6Addr, Instant)>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<(Ipv6Addr, Instant)>();
 
     task::spawn_blocking(move || {
         let mut receiver = icmpv6_packet_iter(&mut raw_rx);
@@ -208,34 +208,39 @@ pub fn ping_v6(
         }
     });
 
-    let mut sent_count = 0;
-    let mut sent = BTreeMap::default();
+    let (sent_count, sent) = task::spawn_blocking(move || {
+        let mut sent_count = 0;
+        let mut sent = BTreeMap::default();
 
-    let mut packet_vec = vec![0u8; usize::from(size)];
-    for addr in addrs {
-        getrandom::getrandom(&mut packet_vec).unwrap();
+        let mut packet_vec = vec![0u8; usize::from(size)];
+        for addr in addrs {
+            getrandom::getrandom(&mut packet_vec).unwrap();
 
-        let mut packet = MutableEchoRequestPacket::new(&mut packet_vec).unwrap();
-        packet.set_sequence_number(1);
-        packet.set_identifier(1);
-        packet.set_icmpv6_type(Icmpv6Types::EchoRequest);
-        packet.set_checksum(util::checksum(packet.packet(), 1));
+            let mut packet = MutableEchoRequestPacket::new(&mut packet_vec).unwrap();
+            packet.set_sequence_number(1);
+            packet.set_identifier(1);
+            packet.set_icmpv6_type(Icmpv6Types::EchoRequest);
+            packet.set_checksum(util::checksum(packet.packet(), 1));
 
-        if raw_tx.send_to(packet, IpAddr::V6(addr)).is_ok() {
-            sent_count += 1;
+            if raw_tx.send_to(packet, IpAddr::V6(addr)).is_ok() {
+                sent_count += 1;
+            }
+
+            let now = Instant::now();
+            sent.insert(addr, now);
         }
 
-        let now = Instant::now();
-        sent.insert(addr, now);
-    }
+        (sent_count, sent)
+    })
+    .await?;
 
     let mut received_count = 0;
     let mut received = sent
         .keys()
         .map(|&ip| (ip, None))
         .collect::<BTreeMap<_, _>>();
-    for (ip, received_at) in rx.into_iter() {
-        if let Some(sent_at) = sent.get_mut(&ip) {
+    while let Some((ip, received_at)) = rx.recv().await {
+        if let Some(sent_at) = sent.get(&ip) {
             let took = received_at.saturating_duration_since(*sent_at);
 
             if let Some(space) = received.get_mut(&ip) {
@@ -268,7 +273,7 @@ mod tests {
         let addrs = [localhost, one_one_one_one, not_answering].into_iter();
         let rtt = Duration::from_secs(5);
         let size = 64;
-        let pings = ping_v4(addrs, rtt, size).unwrap();
+        let pings = ping_v4(addrs, rtt, size).await.unwrap();
         assert_eq!(pings.len(), 3);
         assert!(pings.get(&localhost).unwrap().unwrap() < Duration::from_secs(1));
         // GitHub Actions doesn't support ping
@@ -286,7 +291,7 @@ mod tests {
         let addrs = [localhost, one_one_one_one].into_iter();
         let rtt = Duration::from_secs(5);
         let size = 64;
-        let pings = ping_v6(addrs, rtt, size).unwrap();
+        let pings = ping_v6(addrs, rtt, size).await.unwrap();
         assert_eq!(pings.len(), 2);
         assert!(pings.get(&localhost).unwrap().unwrap() < Duration::from_secs(1));
         // GitHub Actions doesn't support ping

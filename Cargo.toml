@@ -14,7 +14,4 @@ rust-version = "1.56"
 pnet_packet = "0.29"
 pnet_transport = "0.29"
 getrandom = "0.2"
-tokio = { version = "1", features = ["rt"] }
-
-[dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "sync"] }

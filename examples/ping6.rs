@@ -10,7 +10,7 @@ async fn main() {
     let addrs = [localhost, one_one_one_one].into_iter();
     let rtt = Duration::from_secs(5);
     let size = 64;
-    let pings = ping_v6(addrs.into_iter(), rtt, size).unwrap();
+    let pings = ping_v6(addrs.into_iter(), rtt, size).await.unwrap();
 
     println!("{:?}", pings)
 }
