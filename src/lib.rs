@@ -134,6 +134,8 @@ pub fn ping_v4(
 
     let mut packet_vec = vec![0u8; usize::from(size)];
     for addr in addrs {
+        getrandom::getrandom(&mut packet_vec).unwrap();
+
         let mut packet = MutableEchoRequestPacket::new(&mut packet_vec).unwrap();
         packet.set_sequence_number(1);
         packet.set_identifier(1);
@@ -146,8 +148,6 @@ pub fn ping_v4(
 
         let now = Instant::now();
         sent.insert(addr, now);
-
-        packet_vec.fill(0);
     }
 
     let mut received_count = 0;
@@ -217,6 +217,8 @@ pub fn ping_v6(
 
     let mut packet_vec = vec![0u8; usize::from(size)];
     for addr in addrs {
+        getrandom::getrandom(&mut packet_vec).unwrap();
+
         let mut packet = MutableIcmpv6Packet::new(&mut packet_vec).unwrap();
         packet.set_icmpv6_type(Icmpv6Types::EchoRequest);
         packet.set_checksum(util::checksum(packet.packet(), 1));
@@ -227,8 +229,6 @@ pub fn ping_v6(
 
         let now = Instant::now();
         sent.insert(addr, now);
-
-        packet_vec.fill(0);
     }
 
     let mut received_count = 0;
