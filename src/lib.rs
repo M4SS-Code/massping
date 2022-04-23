@@ -17,15 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use pnet_packet::{
-    icmp::{
-        echo_reply::EchoReplyPacket, echo_request::MutableEchoRequestPacket, IcmpType, IcmpTypes,
-    },
-    icmpv6::Icmpv6Type,
-    icmpv6::{Icmpv6Types, MutableIcmpv6Packet},
-    ip::IpNextHeaderProtocols,
-    util, Packet,
-};
+use pnet_packet::{ip::IpNextHeaderProtocols, util, Packet};
 use pnet_transport::{
     icmp_packet_iter, icmpv6_packet_iter, transport_channel, TransportChannelType,
     TransportProtocol,
@@ -99,6 +91,10 @@ pub fn ping_v4(
     rtt: Duration,
     size: u16,
 ) -> io::Result<BTreeMap<Ipv4Addr, Option<Duration>>> {
+    use pnet_packet::icmp::{
+        echo_reply::EchoReplyPacket, echo_request::MutableEchoRequestPacket, IcmpTypes,
+    };
+
     let protocol =
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp));
     let (mut raw_tx, mut raw_rx) = transport_channel(4096, protocol)?;
@@ -112,7 +108,7 @@ pub fn ping_v4(
             match receiver.next_with_timeout(remaining) {
                 Ok(Some((packet, addr))) => {
                     if let Some(reply) = EchoReplyPacket::new(packet.packet()) {
-                        if reply.get_icmp_type() == IcmpType::new(0) {
+                        if reply.get_icmp_type() == IcmpTypes::EchoReply {
                             if let IpAddr::V4(v4) = addr {
                                 let now = Instant::now();
 
@@ -184,6 +180,10 @@ pub fn ping_v6(
     rtt: Duration,
     size: u16,
 ) -> io::Result<BTreeMap<Ipv6Addr, Option<Duration>>> {
+    use pnet_packet::icmpv6::{
+        echo_reply::EchoReplyPacket, echo_request::MutableEchoRequestPacket, Icmpv6Types,
+    };
+
     let protocol =
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Icmpv6));
     let (mut raw_tx, mut raw_rx) = transport_channel(4096, protocol)?;
@@ -196,12 +196,14 @@ pub fn ping_v6(
         while let Some(remaining) = rtt.checked_sub(start_time.elapsed()) {
             match receiver.next_with_timeout(remaining) {
                 Ok(Some((packet, addr))) => {
-                    if packet.get_icmpv6_type() == Icmpv6Type::new(129) {
-                        if let IpAddr::V6(v6) = addr {
-                            let now = Instant::now();
+                    if let Some(reply) = EchoReplyPacket::new(packet.packet()) {
+                        if reply.get_icmpv6_type() == Icmpv6Types::EchoReply {
+                            if let IpAddr::V6(v6) = addr {
+                                let now = Instant::now();
 
-                            if tx.send((v6, now)).is_err() {
-                                break;
+                                if tx.send((v6, now)).is_err() {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -219,7 +221,9 @@ pub fn ping_v6(
     for addr in addrs {
         getrandom::getrandom(&mut packet_vec).unwrap();
 
-        let mut packet = MutableIcmpv6Packet::new(&mut packet_vec).unwrap();
+        let mut packet = MutableEchoRequestPacket::new(&mut packet_vec).unwrap();
+        packet.set_sequence_number(1);
+        packet.set_identifier(1);
         packet.set_icmpv6_type(Icmpv6Types::EchoRequest);
         packet.set_checksum(util::checksum(packet.packet(), 1));
 
