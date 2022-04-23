@@ -60,6 +60,8 @@ jobs:
             rust: beta
           - name: nightly
             rust: nightly
+          - name: MSRV 1.56
+            rust: 1.56
 
     steps:
       - uses: actions/checkout@v2
