@@ -31,8 +31,6 @@ pub async fn ping(
     rtt: Duration,
     size: u16,
 ) -> io::Result<BTreeMap<IpAddr, Option<Duration>>> {
-    let mut received = BTreeMap::new();
-
     let mut v4s = Vec::new();
     let mut v6s = Vec::new();
 
@@ -47,6 +45,15 @@ pub async fn ping(
         }
     }
 
+    ping_impl(v4s, v6s, rtt, size).await
+}
+
+async fn ping_impl(
+    v4s: Vec<Ipv4Addr>,
+    v6s: Vec<Ipv6Addr>,
+    rtt: Duration,
+    size: u16,
+) -> io::Result<BTreeMap<IpAddr, Option<Duration>>> {
     let received4 = (!v4s.is_empty()).then(|| ping_v4(v4s.into_iter(), rtt, size));
     let received6 = (!v6s.is_empty()).then(|| ping_v6(v6s.into_iter(), rtt, size));
 
@@ -60,6 +67,7 @@ pub async fn ping(
         (None, None) => (BTreeMap::new(), BTreeMap::new()),
     };
 
+    let mut received = BTreeMap::new();
     received.extend(
         received4
             .into_iter()
