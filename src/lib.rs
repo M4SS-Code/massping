@@ -85,7 +85,7 @@ async fn ping_impl(
 /// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
 ///
 /// Requires to be run inside the `tokio` 1 context.
-pub async fn ping_v4(
+async fn ping_v4(
     addrs: impl Iterator<Item = Ipv4Addr> + Send + 'static,
     rtt: Duration,
     size: u16,
@@ -177,7 +177,7 @@ pub async fn ping_v4(
 /// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
 ///
 /// Requires to be run inside the `tokio` 1 context.
-pub async fn ping_v6(
+async fn ping_v6(
     addrs: impl Iterator<Item = Ipv6Addr> + Send + 'static,
     rtt: Duration,
     size: u16,
