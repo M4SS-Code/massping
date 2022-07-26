@@ -31,7 +31,7 @@ jobs:
           args: --all -- --check
 
   clippy:
-    name: clippy / stable
+    name: clippy / nightly
     runs-on: ubuntu-latest
 
     steps:
@@ -40,7 +40,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
 
       - run: rustup component add clippy
