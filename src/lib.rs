@@ -7,335 +7,314 @@
 //!
 //! As with the original version, this one also requires to create raw sockets,
 //! so the permission must either be explicitly set
-//! (`sudo setcap cap_net_raw=eip /path/to/binary` for example) or be run as root.
+//! (`sudo setcap cap_net_raw=+ep /path/to/binary` for example) or be run as root.
 
+#[cfg(feature = "strong")]
+use std::time::Instant;
 use std::{
-    collections::BTreeMap,
+    collections::HashMap,
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    time::{Duration, Instant},
+    iter::Peekable,
+    mem::MaybeUninit,
+    net::{Ipv4Addr, Ipv6Addr},
+    sync::{
+        atomic::{AtomicU16, Ordering},
+        Arc,
+    },
+    task::{Context, Poll},
+    time::Duration,
+};
+#[cfg(feature = "stream")]
+use std::{pin::Pin, task::ready};
+
+#[cfg(feature = "stream")]
+use futures_core::Stream;
+use tokio::{
+    sync::mpsc::{
+        self,
+        error::{TryRecvError, TrySendError},
+    },
+    task,
 };
 
-use pnet_packet::{ip::IpNextHeaderProtocols, util, Packet};
-use pnet_transport::{
-    icmp_packet_iter, icmpv6_packet_iter, transport_channel, TransportChannelType,
-    TransportProtocol,
+#[cfg(not(feature = "strong"))]
+use self::instant::Instant;
+pub use self::ip_version::IpVersion;
+use self::{
+    packet::{EchoReplyPacket, EchoRequestPacket},
+    pinger::{RawBlockingPinger, RawPinger},
 };
-use tokio::{sync::mpsc, task};
 
-/// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
-///
-/// Requires to be run inside the `tokio` 1 context.
-pub async fn ping(
-    addrs: impl Iterator<Item = IpAddr>,
-    rtt: Duration,
-    size: u16,
-) -> io::Result<BTreeMap<IpAddr, Option<Duration>>> {
-    let mut v4s = Vec::new();
-    let mut v6s = Vec::new();
+pub type V4Pinger = Pinger<Ipv4Addr>;
+pub type V6Pinger = Pinger<Ipv6Addr>;
 
-    for addr in addrs {
-        match addr {
-            IpAddr::V4(v4) => {
-                v4s.push(v4);
-            }
-            IpAddr::V6(v6) => {
-                v6s.push(v6);
-            }
-        }
-    }
+#[cfg(not(feature = "strong"))]
+mod instant;
+mod ip_version;
+pub mod packet;
+pub mod pinger;
+mod socket;
 
-    ping_impl(v4s, v6s, rtt, size).await
+pub struct Pinger<V: IpVersion> {
+    inner: Arc<InnerPinger<V>>,
 }
 
-async fn ping_impl(
-    v4s: Vec<Ipv4Addr>,
-    v6s: Vec<Ipv6Addr>,
-    rtt: Duration,
-    size: u16,
-) -> io::Result<BTreeMap<IpAddr, Option<Duration>>> {
-    let received4 = (!v4s.is_empty()).then(|| ping_v4(v4s.into_iter(), rtt, size));
-    let received6 = (!v6s.is_empty()).then(|| ping_v6(v6s.into_iter(), rtt, size));
-
-    let (received4, received6) = match (received4, received6) {
-        (Some(received4), Some(received6)) => {
-            let (received4, received6) = tokio::join!(received4, received6);
-            (received4?, received6?)
-        }
-        (Some(received4), None) => (received4.await?, BTreeMap::new()),
-        (None, Some(received6)) => (BTreeMap::new(), received6.await?),
-        (None, None) => (BTreeMap::new(), BTreeMap::new()),
-    };
-
-    let mut received = BTreeMap::new();
-    received.extend(
-        received4
-            .into_iter()
-            .map(|(v4, took)| (IpAddr::V4(v4), took)),
-    );
-    received.extend(
-        received6
-            .into_iter()
-            .map(|(v6, took)| (IpAddr::V6(v6), took)),
-    );
-
-    Ok(received)
+struct InnerPinger<V: IpVersion> {
+    raw: RawPinger<V>,
+    round_sender: mpsc::Sender<RoundMessage<V>>,
+    identifier: u16,
+    sequence_number: AtomicU16,
 }
 
-/// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
-///
-/// Requires to be run inside the `tokio` 1 context.
-async fn ping_v4(
-    addrs: impl Iterator<Item = Ipv4Addr> + Send + 'static,
-    rtt: Duration,
-    size: u16,
-) -> io::Result<BTreeMap<Ipv4Addr, Option<Duration>>> {
-    use pnet_packet::icmp::{
-        echo_reply::EchoReplyPacket, echo_request::MutableEchoRequestPacket, IcmpTypes,
-    };
+enum RoundMessage<V: IpVersion> {
+    Subscribe {
+        sequence_number: u16,
+        #[cfg(feature = "strong")]
+        sender: mpsc::Sender<(V, Instant)>,
+        #[cfg(not(feature = "strong"))]
+        sender: mpsc::Sender<(V, Instant, Instant)>,
+    },
+    Unsubscribe {
+        sequence_number: u16,
+    },
+}
 
-    let protocol =
-        TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp));
-    let (mut raw_tx, mut raw_rx) = transport_channel(4096, protocol)?;
-    let (tx, mut rx) = mpsc::unbounded_channel::<(Ipv4Addr, Instant)>();
+impl<V: IpVersion> Pinger<V> {
+    pub fn new() -> io::Result<Self> {
+        let raw = RawPinger::new()?;
+        let raw_blocking = RawBlockingPinger::new()?;
 
-    task::spawn_blocking(move || {
-        let mut receiver = icmp_packet_iter(&mut raw_rx);
+        let mut identifier = [0; 2];
+        getrandom::getrandom(&mut identifier).expect("run getrandom");
+        let identifier = u16::from_ne_bytes(identifier);
 
-        let start_time = Instant::now();
-        while let Some(remaining) = rtt.checked_sub(start_time.elapsed()) {
-            match receiver.next_with_timeout(remaining) {
-                Ok(Some((packet, addr))) => {
-                    if let Some(reply) = EchoReplyPacket::new(packet.packet()) {
-                        if reply.get_icmp_type() == IcmpTypes::EchoReply {
-                            if let IpAddr::V4(v4) = addr {
-                                let now = Instant::now();
+        let (sender, mut receiver) = mpsc::channel(8);
 
-                                if tx.send((v4, now)).is_err() {
-                                    break;
-                                }
-                            }
+        let inner = Arc::new(InnerPinger {
+            raw,
+            round_sender: sender,
+            identifier,
+            sequence_number: AtomicU16::new(0),
+        });
+        task::spawn_blocking(move || {
+            let mut buf = [MaybeUninit::<u8>::uninit(); 1600];
+
+            #[cfg(feature = "strong")]
+            let mut subscribers: HashMap<u16, mpsc::Sender<(V, Instant)>> = HashMap::new();
+            #[cfg(not(feature = "strong"))]
+            let mut subscribers: HashMap<u16, mpsc::Sender<(V, Instant, Instant)>> = HashMap::new();
+            'packets: while let Ok(packet) = raw_blocking.recv(&mut buf) {
+                if packet.identifier() != identifier {
+                    continue 'packets;
+                }
+
+                let recv_instant = Instant::now();
+
+                #[cfg(not(feature = "strong"))]
+                let send_instant = {
+                    let payload = packet.payload();
+                    match Instant::decode(payload[..Instant::ENCODED_LEN].try_into().unwrap()) {
+                        Some(send_instant) => send_instant,
+                        None => continue 'packets,
+                    }
+                };
+
+                let packet_source = packet.source();
+                let packet_sequence_number = packet.sequence_number();
+                match subscribers.get(&packet_sequence_number) {
+                    Some(subscriber) => {
+                        #[cfg(feature = "strong")]
+                        if let Err(TrySendError::Closed(_)) =
+                            subscriber.try_send((packet_source, recv_instant))
+                        {
+                            // Closed
+                            subscribers.remove(&packet_sequence_number);
+                        }
+
+                        #[cfg(not(feature = "strong"))]
+                        if let Err(TrySendError::Closed(_)) =
+                            subscriber.try_send((packet_source, send_instant, recv_instant))
+                        {
+                            // Closed
+                            subscribers.remove(&packet_sequence_number);
                         }
                     }
-                }
-                Ok(None) => break,
-                Err(_) => break,
-            }
-        }
-    });
+                    None => 'registrations: loop {
+                        match receiver.try_recv() {
+                            Ok(RoundMessage::Subscribe {
+                                sequence_number,
+                                sender,
+                            }) => {
+                                if packet_sequence_number == sequence_number {
+                                    // Packet matches
 
-    let (sent_count, sent) = task::spawn_blocking(move || {
-        let mut sent_count = 0;
-        let mut sent = BTreeMap::default();
+                                    #[cfg(feature = "strong")]
+                                    if sender.try_send((packet_source, recv_instant)).is_err() {
+                                        // Closed
+                                        continue 'registrations;
+                                    }
 
-        let mut packet_vec = vec![0u8; usize::from(size)];
-        for addr in addrs {
-            getrandom::getrandom(&mut packet_vec).unwrap();
-
-            let mut packet = MutableEchoRequestPacket::new(&mut packet_vec).unwrap();
-            packet.set_sequence_number(1);
-            packet.set_identifier(1);
-            packet.set_icmp_type(IcmpTypes::EchoRequest);
-            packet.set_checksum(util::checksum(packet.packet(), 1));
-
-            if raw_tx.send_to(packet, IpAddr::V4(addr)).is_ok() {
-                sent_count += 1;
-            }
-
-            let now = Instant::now();
-            sent.insert(addr, now);
-        }
-
-        (sent_count, sent)
-    })
-    .await?;
-
-    let mut received_count = 0;
-    let mut received = sent
-        .keys()
-        .map(|&ip| (ip, None))
-        .collect::<BTreeMap<_, _>>();
-    while let Some((ip, received_at)) = rx.recv().await {
-        if let Some(sent_at) = sent.get(&ip) {
-            let took = received_at.saturating_duration_since(*sent_at);
-
-            if let Some(space) = received.get_mut(&ip) {
-                if space.is_none() {
-                    *space = Some(took);
-                    received_count += 1;
-
-                    if received_count == sent_count {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    Ok(received)
-}
-
-/// Ping `addrs` with a max RTT of `rtt` and a packet size of `size`
-///
-/// Requires to be run inside the `tokio` 1 context.
-async fn ping_v6(
-    addrs: impl Iterator<Item = Ipv6Addr> + Send + 'static,
-    rtt: Duration,
-    size: u16,
-) -> io::Result<BTreeMap<Ipv6Addr, Option<Duration>>> {
-    use pnet_packet::icmpv6::{
-        echo_reply::EchoReplyPacket, echo_request::MutableEchoRequestPacket, Icmpv6Types,
-    };
-
-    let protocol =
-        TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Icmpv6));
-    let (mut raw_tx, mut raw_rx) = transport_channel(4096, protocol)?;
-    let (tx, mut rx) = mpsc::unbounded_channel::<(Ipv6Addr, Instant)>();
-
-    task::spawn_blocking(move || {
-        let mut receiver = icmpv6_packet_iter(&mut raw_rx);
-
-        let start_time = Instant::now();
-        while let Some(remaining) = rtt.checked_sub(start_time.elapsed()) {
-            match receiver.next_with_timeout(remaining) {
-                Ok(Some((packet, addr))) => {
-                    if let Some(reply) = EchoReplyPacket::new(packet.packet()) {
-                        if reply.get_icmpv6_type() == Icmpv6Types::EchoReply {
-                            if let IpAddr::V6(v6) = addr {
-                                let now = Instant::now();
-
-                                if tx.send((v6, now)).is_err() {
-                                    break;
+                                    #[cfg(not(feature = "strong"))]
+                                    if sender
+                                        .try_send((packet_source, send_instant, recv_instant))
+                                        .is_err()
+                                    {
+                                        // Closed
+                                        continue 'registrations;
+                                    }
                                 }
+
+                                subscribers.insert(sequence_number, sender);
+                            }
+                            Ok(RoundMessage::Unsubscribe { sequence_number }) => {
+                                drop(subscribers.remove(&sequence_number));
+                            }
+                            Err(TryRecvError::Empty) => {
+                                break 'registrations;
+                            }
+                            Err(TryRecvError::Disconnected) => {
+                                break 'packets;
                             }
                         }
-                    }
-                }
-                Ok(None) => break,
-                Err(_) => break,
-            }
-        }
-    });
-
-    let (sent_count, sent) = task::spawn_blocking(move || {
-        let mut sent_count = 0;
-        let mut sent = BTreeMap::default();
-
-        let mut packet_vec = vec![0u8; usize::from(size)];
-        for addr in addrs {
-            getrandom::getrandom(&mut packet_vec).unwrap();
-
-            let mut packet = MutableEchoRequestPacket::new(&mut packet_vec).unwrap();
-            packet.set_sequence_number(1);
-            packet.set_identifier(1);
-            packet.set_icmpv6_type(Icmpv6Types::EchoRequest);
-            packet.set_checksum(util::checksum(packet.packet(), 1));
-
-            if raw_tx.send_to(packet, IpAddr::V6(addr)).is_ok() {
-                sent_count += 1;
-            }
-
-            let now = Instant::now();
-            sent.insert(addr, now);
-        }
-
-        (sent_count, sent)
-    })
-    .await?;
-
-    let mut received_count = 0;
-    let mut received = sent
-        .keys()
-        .map(|&ip| (ip, None))
-        .collect::<BTreeMap<_, _>>();
-    while let Some((ip, received_at)) = rx.recv().await {
-        if let Some(sent_at) = sent.get(&ip) {
-            let took = received_at.saturating_duration_since(*sent_at);
-
-            if let Some(space) = received.get_mut(&ip) {
-                if space.is_none() {
-                    *space = Some(took);
-                    received_count += 1;
-
-                    if received_count == sent_count {
-                        break;
-                    }
+                    },
                 }
             }
+        });
+
+        Ok(Self { inner })
+    }
+
+    pub fn measure_many<I>(&self, addresses: I) -> MeasureManyStream<'_, V, I>
+    where
+        I: Iterator<Item = V>,
+    {
+        let send_queue = addresses.into_iter().peekable();
+        let (sender, receiver) = mpsc::channel(32);
+
+        let sequence_number = self.inner.sequence_number.fetch_add(1, Ordering::AcqRel);
+        if self
+            .inner
+            .round_sender
+            .try_send(RoundMessage::Subscribe {
+                sequence_number,
+                sender,
+            })
+            .is_err()
+        {
+            panic!("Couldn't register sender");
+        }
+
+        MeasureManyStream {
+            pinger: self,
+            send_queue,
+            #[cfg(feature = "strong")]
+            in_flight: HashMap::new(),
+            receiver,
+            sequence_number,
         }
     }
-    Ok(received)
 }
 
-#[cfg(test)]
-mod tests {
-    use std::env;
+pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
+    pinger: &'a Pinger<V>,
+    send_queue: Peekable<I>,
+    #[cfg(feature = "strong")]
+    in_flight: HashMap<V, Instant>,
+    #[cfg(feature = "strong")]
+    receiver: mpsc::Receiver<(V, Instant)>,
+    #[cfg(not(feature = "strong"))]
+    receiver: mpsc::Receiver<(V, Instant, Instant)>,
+    sequence_number: u16,
+}
 
-    use super::*;
+impl<'a, V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'a, V, I> {
+    pub fn poll_next_unpin(&mut self, cx: &mut Context) -> Poll<(V, Duration)> {
+        // Try to see if another `MeasureManyStream` got it
+        if let Poll::Ready(Some((addr, rtt))) = self.poll_next_from_different_round(cx) {
+            return Poll::Ready((addr, rtt));
+        }
 
-    #[tokio::test]
-    async fn ipv4() {
-        let localhost = "127.0.0.1".parse().unwrap();
-        let one_one_one_one = "1.1.1.1".parse().unwrap();
-        let not_answering = "0.0.0.1".parse().unwrap();
+        // Try to send ICMP echo requests
+        self.poll_next_icmp_replys(cx);
 
-        let addrs = [localhost, one_one_one_one, not_answering].into_iter();
-        let rtt = Duration::from_secs(5);
-        let size = 64;
-        let pings = ping_v4(addrs, rtt, size).await.unwrap();
-        assert_eq!(pings.len(), 3);
-        assert!(pings.get(&localhost).unwrap().unwrap() < Duration::from_secs(1));
-        // GitHub Actions doesn't support ping
-        if env::var("CI").is_err() {
-            assert!(pings.get(&one_one_one_one).unwrap().unwrap() < rtt);
-            assert!(pings.get(&not_answering).unwrap().is_none());
+        Poll::Pending
+    }
+
+    fn poll_next_icmp_replys(&mut self, cx: &mut Context) {
+        while let Some(&addr) = self.send_queue.peek() {
+            let mut payload = [0; 64];
+            #[cfg(feature = "strong")]
+            getrandom::getrandom(&mut payload).expect("generate random payload");
+            #[cfg(not(feature = "strong"))]
+            {
+                let now = Instant::now().encode();
+                let (now_part, random_part) = payload.split_at_mut(now.len());
+                now_part.copy_from_slice(&now);
+                getrandom::getrandom(random_part).expect("generate random payload");
+            }
+
+            let packet = EchoRequestPacket::new(
+                self.pinger.inner.identifier,
+                self.sequence_number,
+                &payload,
+            );
+            match self.pinger.inner.raw.poll_send_to(cx, addr, &packet) {
+                Poll::Ready(_) => {
+                    #[cfg(feature = "strong")]
+                    let sent_at = Instant::now();
+
+                    let taken_addr = self.send_queue.next();
+                    debug_assert!(taken_addr.is_some());
+
+                    #[cfg(feature = "strong")]
+                    self.in_flight.insert(addr, sent_at);
+                }
+                Poll::Pending => break,
+            }
         }
     }
 
-    #[tokio::test]
-    async fn ipv6() {
-        let localhost = "::1".parse().unwrap();
-        let one_one_one_one = "2606:4700:4700::1111".parse().unwrap();
-
-        let addrs = [localhost, one_one_one_one].into_iter();
-        let rtt = Duration::from_secs(5);
-        let size = 64;
-        let pings = ping_v6(addrs, rtt, size).await.unwrap();
-        assert_eq!(pings.len(), 2);
-        assert!(pings.get(&localhost).unwrap().unwrap() < Duration::from_secs(1));
-        // GitHub Actions doesn't support ping
-        if env::var("CI").is_err() {
-            assert!(pings.get(&one_one_one_one).unwrap().unwrap() < rtt);
+    #[cfg_attr(not(feature = "strong"), allow(clippy::never_loop))]
+    fn poll_next_from_different_round(&mut self, cx: &mut Context) -> Poll<Option<(V, Duration)>> {
+        loop {
+            match self.receiver.poll_recv(cx) {
+                Poll::Pending => return Poll::Pending,
+                #[cfg(feature = "strong")]
+                Poll::Ready(Some((addr, recv_instant))) => {
+                    if let Some(send_instant) = self.in_flight.remove(&addr) {
+                        let rtt = recv_instant - send_instant;
+                        return Poll::Ready(Some((addr, rtt)));
+                    }
+                }
+                #[cfg(not(feature = "strong"))]
+                Poll::Ready(Some((addr, send_instant, recv_instant))) => {
+                    let rtt = recv_instant - send_instant;
+                    return Poll::Ready(Some((addr, rtt)));
+                }
+                Poll::Ready(None) => return Poll::Ready(None),
+            }
         }
     }
+}
 
-    #[tokio::test]
-    async fn both() {
-        let localhost_v4 = "127.0.0.1".parse().unwrap();
-        let one_one_one_one_v4 = "1.1.1.1".parse().unwrap();
-        let not_answering_v4 = "0.0.0.1".parse().unwrap();
-        let localhost_v6 = "::1".parse().unwrap();
-        let one_one_one_one_v6 = "2606:4700:4700::1111".parse().unwrap();
+#[cfg(feature = "stream")]
+impl<'a, V: IpVersion, I: Iterator<Item = V> + Unpin> Stream for MeasureManyStream<'a, V, I> {
+    type Item = (V, Duration);
 
-        let addrs = [
-            localhost_v4,
-            one_one_one_one_v4,
-            not_answering_v4,
-            localhost_v6,
-            one_one_one_one_v6,
-        ]
-        .into_iter();
-        let rtt = Duration::from_secs(5);
-        let size = 64;
-        let pings = ping(addrs, rtt, size).await.unwrap();
-        assert_eq!(pings.len(), 5);
-        assert!(pings.get(&localhost_v4).unwrap().unwrap() < Duration::from_secs(1));
-        assert!(pings.get(&not_answering_v4).unwrap().is_none());
-        assert!(pings.get(&localhost_v6).unwrap().unwrap() < Duration::from_secs(1));
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let result = ready!(self.as_mut().poll_next_unpin(cx));
+        Poll::Ready(Some(result))
+    }
+}
 
-        // GitHub Actions doesn't support ping
-        if env::var("CI").is_err() {
-            assert!(pings.get(&one_one_one_one_v4).unwrap().unwrap() < rtt);
-            assert!(pings.get(&one_one_one_one_v6).unwrap().unwrap() < rtt);
-        }
+impl<'a, V: IpVersion, I: Iterator<Item = V>> Drop for MeasureManyStream<'a, V, I> {
+    fn drop(&mut self) {
+        let _ = self
+            .pinger
+            .inner
+            .round_sender
+            .try_send(RoundMessage::Unsubscribe {
+                sequence_number: self.sequence_number,
+            });
     }
 }

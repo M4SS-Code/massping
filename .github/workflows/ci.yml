@@ -54,14 +54,14 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: stable
-            rust: stable
-          - name: beta
-            rust: beta
+          #- name: stable
+          #  rust: stable
+          #- name: beta
+          #  rust: beta
           - name: nightly
             rust: nightly
-          - name: MSRV 1.56
-            rust: 1.56
+          #- name: MSRV 1.64
+          #  rust: 1.64
 
     steps:
       - uses: actions/checkout@v2

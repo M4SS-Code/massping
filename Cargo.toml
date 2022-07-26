@@ -8,10 +8,26 @@ keywords = ["icmp", "ping"]
 categories = ["network-programming"]
 repository = "https://github.com/M4SS-Code/massping"
 readme = "README.md"
-rust-version = "1.56"
+rust-version = "1.64"
 
 [dependencies]
 pnet_packet = "0.31"
-pnet_transport = "0.31"
+socket2 = "0.4"
+
 getrandom = "0.2"
-tokio = { version = "1.14", features = ["macros", "rt", "sync"] }
+tokio = { version = "1.14", features = ["net", "sync", "rt"] }
+
+# weak
+libc = "0.2"
+
+# stream
+futures-core = { version = "0.3", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.14", features = ["macros", "time"] }
+futures-util = { version = "0.3", default-features = false }
+
+[features]
+default = ["strong", "stream"]
+strong = []
+stream = ["dep:futures-core"]

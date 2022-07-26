@@ -1,0 +1,56 @@
+use std::{
+    io,
+    mem::MaybeUninit,
+    net::SocketAddr,
+    os::unix::io::{AsRawFd, RawFd},
+    slice,
+};
+
+use socket2::{Domain, Protocol, SockAddr, Type};
+
+use crate::IpVersion;
+
+pub struct BaseSocket {
+    socket: socket2::Socket,
+}
+
+impl BaseSocket {
+    pub fn new_icmp<V: IpVersion>(blocking: bool) -> io::Result<Self> {
+        let socket = if V::IS_V4 {
+            Self::new_icmpv4()
+        } else {
+            Self::new_icmpv6()
+        }?;
+
+        if !blocking {
+            socket.set_nonblocking(blocking)?;
+        }
+        Ok(Self { socket })
+    }
+
+    fn new_icmpv4() -> io::Result<socket2::Socket> {
+        socket2::Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4))
+    }
+
+    fn new_icmpv6() -> io::Result<socket2::Socket> {
+        socket2::Socket::new(Domain::IPV6, Type::RAW, Some(Protocol::ICMPV6))
+    }
+
+    pub fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<&'_ [u8]> {
+        self.socket
+            .recv(buf)
+            .map(|filled| unsafe { slice::from_raw_parts(buf.as_ptr().cast::<u8>(), filled) })
+    }
+
+    pub fn send_to(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
+        let addr = SockAddr::from(addr);
+
+        self.socket.send_to(buf, &addr)
+    }
+}
+
+impl AsRawFd for BaseSocket {
+    fn as_raw_fd(&self) -> RawFd {
+        self.socket.as_raw_fd()
+    }
+}
