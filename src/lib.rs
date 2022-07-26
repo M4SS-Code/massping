@@ -30,10 +30,7 @@ use std::{pin::Pin, task::ready};
 #[cfg(feature = "stream")]
 use futures_core::Stream;
 use tokio::{
-    sync::mpsc::{
-        self,
-        error::{TryRecvError, TrySendError},
-    },
+    sync::mpsc::{self, error::TryRecvError},
     task,
 };
 
@@ -61,7 +58,7 @@ pub struct Pinger<V: IpVersion> {
 
 struct InnerPinger<V: IpVersion> {
     raw: RawPinger<V>,
-    round_sender: mpsc::Sender<RoundMessage<V>>,
+    round_sender: mpsc::UnboundedSender<RoundMessage<V>>,
     identifier: u16,
     sequence_number: AtomicU16,
 }
@@ -70,9 +67,9 @@ enum RoundMessage<V: IpVersion> {
     Subscribe {
         sequence_number: u16,
         #[cfg(feature = "strong")]
-        sender: mpsc::Sender<(V, Instant)>,
+        sender: mpsc::UnboundedSender<(V, Instant)>,
         #[cfg(not(feature = "strong"))]
-        sender: mpsc::Sender<(V, Instant, Instant)>,
+        sender: mpsc::UnboundedSender<(V, Instant, Instant)>,
     },
     Unsubscribe {
         sequence_number: u16,
@@ -88,7 +85,7 @@ impl<V: IpVersion> Pinger<V> {
         getrandom::getrandom(&mut identifier).expect("run getrandom");
         let identifier = u16::from_ne_bytes(identifier);
 
-        let (sender, mut receiver) = mpsc::channel(8);
+        let (sender, mut receiver) = mpsc::unbounded_channel();
 
         let inner = Arc::new(InnerPinger {
             raw,
@@ -100,9 +97,12 @@ impl<V: IpVersion> Pinger<V> {
             let mut buf = [MaybeUninit::<u8>::uninit(); 1600];
 
             #[cfg(feature = "strong")]
-            let mut subscribers: HashMap<u16, mpsc::Sender<(V, Instant)>> = HashMap::new();
+            let mut subscribers: HashMap<u16, mpsc::UnboundedSender<(V, Instant)>> = HashMap::new();
             #[cfg(not(feature = "strong"))]
-            let mut subscribers: HashMap<u16, mpsc::Sender<(V, Instant, Instant)>> = HashMap::new();
+            let mut subscribers: HashMap<
+                u16,
+                mpsc::UnboundedSender<(V, Instant, Instant)>,
+            > = HashMap::new();
             'packets: while let Ok(packet) = raw_blocking.recv(&mut buf) {
                 if packet.identifier() != identifier {
                     continue 'packets;
@@ -124,16 +124,15 @@ impl<V: IpVersion> Pinger<V> {
                 match subscribers.get(&packet_sequence_number) {
                     Some(subscriber) => {
                         #[cfg(feature = "strong")]
-                        if let Err(TrySendError::Closed(_)) =
-                            subscriber.try_send((packet_source, recv_instant))
-                        {
+                        if subscriber.send((packet_source, recv_instant)).is_err() {
                             // Closed
                             subscribers.remove(&packet_sequence_number);
                         }
 
                         #[cfg(not(feature = "strong"))]
-                        if let Err(TrySendError::Closed(_)) =
-                            subscriber.try_send((packet_source, send_instant, recv_instant))
+                        if subscriber
+                            .send((packet_source, send_instant, recv_instant))
+                            .is_err()
                         {
                             // Closed
                             subscribers.remove(&packet_sequence_number);
@@ -149,16 +148,15 @@ impl<V: IpVersion> Pinger<V> {
                                     // Packet matches
 
                                     #[cfg(feature = "strong")]
-                                    if let Err(TrySendError::Closed(_)) =
-                                        sender.try_send((packet_source, recv_instant))
-                                    {
+                                    if sender.send((packet_source, recv_instant)).is_err() {
                                         // Closed
                                         continue 'registrations;
                                     }
 
                                     #[cfg(not(feature = "strong"))]
-                                    if let Err(TrySendError::Closed(_)) =
-                                        sender.try_send((packet_source, send_instant, recv_instant))
+                                    if sender
+                                        .send((packet_source, send_instant, recv_instant))
+                                        .is_err()
                                     {
                                         // Closed
                                         continue 'registrations;
@@ -190,19 +188,19 @@ impl<V: IpVersion> Pinger<V> {
         I: Iterator<Item = V>,
     {
         let send_queue = addresses.into_iter().peekable();
-        let (sender, receiver) = mpsc::channel(32);
+        let (sender, receiver) = mpsc::unbounded_channel();
 
         let sequence_number = self.inner.sequence_number.fetch_add(1, Ordering::AcqRel);
         if self
             .inner
             .round_sender
-            .try_send(RoundMessage::Subscribe {
+            .send(RoundMessage::Subscribe {
                 sequence_number,
                 sender,
             })
             .is_err()
         {
-            panic!("Couldn't register sender");
+            panic!("Receiver closed");
         }
 
         MeasureManyStream {
@@ -222,9 +220,9 @@ pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
     #[cfg(feature = "strong")]
     in_flight: HashMap<V, Instant>,
     #[cfg(feature = "strong")]
-    receiver: mpsc::Receiver<(V, Instant)>,
+    receiver: mpsc::UnboundedReceiver<(V, Instant)>,
     #[cfg(not(feature = "strong"))]
-    receiver: mpsc::Receiver<(V, Instant, Instant)>,
+    receiver: mpsc::UnboundedReceiver<(V, Instant, Instant)>,
     sequence_number: u16,
 }
 
@@ -314,7 +312,7 @@ impl<'a, V: IpVersion, I: Iterator<Item = V>> Drop for MeasureManyStream<'a, V, 
             .pinger
             .inner
             .round_sender
-            .try_send(RoundMessage::Unsubscribe {
+            .send(RoundMessage::Unsubscribe {
                 sequence_number: self.sequence_number,
             });
     }
