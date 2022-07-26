@@ -149,15 +149,16 @@ impl<V: IpVersion> Pinger<V> {
                                     // Packet matches
 
                                     #[cfg(feature = "strong")]
-                                    if sender.try_send((packet_source, recv_instant)).is_err() {
+                                    if let Err(TrySendError::Closed(_)) =
+                                        sender.try_send((packet_source, recv_instant))
+                                    {
                                         // Closed
                                         continue 'registrations;
                                     }
 
                                     #[cfg(not(feature = "strong"))]
-                                    if sender
-                                        .try_send((packet_source, send_instant, recv_instant))
-                                        .is_err()
+                                    if let Err(TrySendError::Closed(_)) =
+                                        sender.try_send((packet_source, send_instant, recv_instant))
                                     {
                                         // Closed
                                         continue 'registrations;
