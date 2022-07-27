@@ -4,7 +4,9 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-pub trait IpVersion: Copy + Sized + Hash + Eq + Unpin + Send + Sync + Display + 'static {
+pub trait IpVersion:
+    Copy + Sized + Hash + Eq + Unpin + Send + Sync + Display + 'static + private::Sealed
+{
     const IS_V4: bool;
 
     fn to_socket_addr(self) -> SocketAddr;
@@ -23,4 +25,13 @@ impl IpVersion for Ipv6Addr {
     fn to_socket_addr(self) -> SocketAddr {
         SocketAddr::new(IpAddr::V6(self), 0)
     }
+}
+
+mod private {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    pub trait Sealed {}
+
+    impl Sealed for Ipv4Addr {}
+    impl Sealed for Ipv6Addr {}
 }
