@@ -1,4 +1,4 @@
-use std::{borrow::Cow, io, marker::PhantomData, mem::MaybeUninit};
+use std::{borrow::Cow, io, marker::PhantomData, mem::MaybeUninit, time::Duration};
 
 use crate::{socket::BaseSocket, EchoReplyPacket, EchoRequestPacket, IpVersion};
 
@@ -9,7 +9,7 @@ pub struct RawBlockingPinger<V: IpVersion> {
 
 impl<V: IpVersion> RawBlockingPinger<V> {
     pub fn new() -> io::Result<Self> {
-        let socket = BaseSocket::new_icmp::<V>(true)?;
+        let socket = BaseSocket::new_icmp::<V>(true, Some(Duration::from_secs(5)))?;
 
         Ok(Self {
             socket,
@@ -22,13 +22,13 @@ impl<V: IpVersion> RawBlockingPinger<V> {
         self.socket.send_to(packet.as_bytes(), addr).map(|_sent| ())
     }
 
-    pub fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<EchoReplyPacket<'_, V>> {
-        loop {
-            let received = self.socket.recv(buf)?;
+    pub fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<Option<EchoReplyPacket<'_, V>>> {
+        let received = match self.socket.recv(buf) {
+            Ok(received) => received,
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+            Err(err) => return Err(err),
+        };
 
-            if let Some(packet) = EchoReplyPacket::from_reply(Cow::Borrowed(received)) {
-                return Ok(packet);
-            }
-        }
+        Ok(EchoReplyPacket::from_reply(Cow::Borrowed(received)))
     }
 }

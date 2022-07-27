@@ -104,9 +104,10 @@ impl<V: IpVersion> Pinger<V> {
                 mpsc::UnboundedSender<(V, Instant, Instant)>,
             > = HashMap::new();
             'packets: while let Ok(packet) = raw_blocking.recv(&mut buf) {
-                if packet.identifier() != identifier {
-                    continue 'packets;
-                }
+                let packet = match packet {
+                    Some(packet) if packet.identifier() == identifier => packet,
+                    _ => continue 'packets,
+                };
 
                 let recv_instant = Instant::now();
 
