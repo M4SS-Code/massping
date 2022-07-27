@@ -6,13 +6,25 @@
 [![Rustc Version 1.64.0+](https://img.shields.io/badge/rustc-1.64.0+-lightgray.svg)](https://forge.rust-lang.org/)
 [![CI](https://github.com/M4SS-Code/massping/actions/workflows/ci.yml/badge.svg)](https://github.com/M4SS-Code/massping/actions/workflows/ci.yml)
 
-A simplified version of [fastping-rs](https://github.com/bparli/fastping-rs)
-without some of its [issues](https://github.com/bparli/fastping-rs/issues/25).
+Asynchronous ICMP ping library using Linux RAW sockets and the
+tokio runtime.
 
-Depends on the tokio 1 runtime.
+As this crate needs to use RAW sockets, it must either be run as root
+or permission must explicitly be set via
+`sudo setcap cap_net_raw=+eip path/to/binary`.
 
-Tested on: Linux
+## Features
 
-As with the original version, this one also requires to create raw sockets,
-so the permission must either be explicitly set
-(`sudo setcap cap_net_raw=eip /path/to/binary` for example) or be run as root.
+* `strong`: implements strong checking for the RTT. Disabling this
+            feature makes the pinger a little bit faster, but opens
+            you up to some servers, like those running [pong][ping],
+            to taking the ping times.
+* `stream`: implements `Stream` for `MeasureManyStream`.
+
+## MSRV version policy
+
+This project has a CI job to prevent accidental bumping of the MSRV.
+We might bump MSRV version at any time. If you require a lower MSRV
+please open an issue.
+
+[ping]: https://github.com/m-ou-se/pong

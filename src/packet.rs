@@ -10,17 +10,20 @@ use pnet_packet::{
 
 use crate::IpVersion;
 
+/// An ICMP echo request packet
 pub struct EchoRequestPacket<V: IpVersion> {
     buf: Vec<u8>,
     _version: PhantomData<V>,
 }
 
+/// An ICMP echo reply packet
 pub struct EchoReplyPacket<'a, V: IpVersion> {
     buf: Cow<'a, [u8]>,
     _version: PhantomData<V>,
 }
 
 impl<V: IpVersion> EchoRequestPacket<V> {
+    /// Build a new ICMP echo request packet
     pub fn new(identifier: u16, sequence_number: u16, payload: &[u8]) -> Self {
         if V::IS_V4 {
             use pnet_packet::icmp::echo_request::MutableEchoRequestPacket;
@@ -70,6 +73,7 @@ impl<V: IpVersion> EchoRequestPacket<V> {
 }
 
 impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
+    /// Parse an IP packet containing an ICMP echo reply packet
     pub(crate) fn from_reply(buf: Cow<'a, [u8]>) -> Option<Self> {
         if V::IS_V4 && let Some(ip_packet) = Ipv4Packet::new(&buf) && let Some(icmp_packet) = IcmpPacket::new(ip_packet.payload()) && icmp_packet.get_icmp_type() == IcmpTypes::EchoReply {
            // SAFETY: we just checked that the packet is valid
@@ -89,6 +93,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
         }
     }
 
+    /// Get the source IP address
     pub fn source(&self) -> V {
         if V::IS_V4 {
             // SAFETY: the check has already been done by the builder
@@ -107,6 +112,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
         }
     }
 
+    /// Get the ICMP packet identifier
     pub fn identifier(&self) -> u16 {
         if V::IS_V4 {
             use pnet_packet::icmp::echo_reply::EchoReplyPacket;
@@ -127,6 +133,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
         }
     }
 
+    /// Get the ICMP packet sequence number
     pub fn sequence_number(&self) -> u16 {
         if V::IS_V4 {
             use pnet_packet::icmp::echo_reply::EchoReplyPacket;
@@ -147,6 +154,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
         }
     }
 
+    /// Get the ICMP packet payload
     pub fn payload(&self) -> &[u8] {
         // TODO: Fix
         &self.buf[self.buf.len() - 64..]

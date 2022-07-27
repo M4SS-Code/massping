@@ -10,6 +10,10 @@ repository = "https://github.com/M4SS-Code/massping"
 readme = "README.md"
 rust-version = "1.64"
 
+[package.metadata.docs.rs]
+features = ["tokio/time"]
+all-features = true
+
 [dependencies]
 pnet_packet = "0.31"
 socket2 = "0.4"

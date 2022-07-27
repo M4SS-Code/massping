@@ -1,13 +1,32 @@
-//! A simplified version of [fastping-rs](https://github.com/bparli/fastping-rs)
-//! without some of its [issues](https://github.com/bparli/fastping-rs/issues/25).
+//! Asynchronous ICMP ping library using Linux RAW sockets and the
+//! tokio runtime.
 //!
-//! Depends on the tokio 1 runtime.
+//! As this crate needs to use RAW sockets, it must either be run as root
+//! or permission must explicitly be set via
+//! `sudo setcap cap_net_raw=+eip path/to/binary`.
 //!
-//! Tested on: Linux
+//! ## Features
 //!
-//! As with the original version, this one also requires to create raw sockets,
-//! so the permission must either be explicitly set
-//! (`sudo setcap cap_net_raw=+ep /path/to/binary` for example) or be run as root.
+//! * `strong`: implements strong checking for the RTT. Disabling this
+//!             feature makes the pinger a little bit faster, but opens
+//!             you up to some servers, like those running [pong][ping],
+//!             to taking the ping times.
+//! * `stream`: implements [`Stream`] for [`MeasureManyStream`].
+//!
+//! ## MSRV version policy
+//!
+//! This project has a CI job to prevent accidental bumping of the MSRV.
+//! We might bump MSRV version at any time. If you require a lower MSRV
+//! please open an issue.
+//!
+//! [ping]: https://github.com/m-ou-se/pong
+//! [`Stream`]: futures_core::Stream
+
+#![deny(
+    rust_2018_idioms,
+    clippy::doc_markdown,
+    rustdoc::broken_intra_doc_links
+)]
 
 #[cfg(feature = "strong")]
 use std::time::Instant;
@@ -42,7 +61,9 @@ use self::{
     pinger::{RawBlockingPinger, RawPinger},
 };
 
+/// A pinger for IPv4 addresses
 pub type V4Pinger = Pinger<Ipv4Addr>;
+/// A pinger for IPv6 addresses
 pub type V6Pinger = Pinger<Ipv6Addr>;
 
 #[cfg(not(feature = "strong"))]
@@ -52,6 +73,7 @@ pub mod packet;
 pub mod pinger;
 mod socket;
 
+/// A pinger for [`IpVersion`] (either [`Ipv4Addr`] or [`Ipv6Addr`]).
 pub struct Pinger<V: IpVersion> {
     inner: Arc<InnerPinger<V>>,
 }
@@ -77,6 +99,12 @@ enum RoundMessage<V: IpVersion> {
 }
 
 impl<V: IpVersion> Pinger<V> {
+    /// Construct a new `Pinger`.
+    ///
+    /// For maximum efficiency the same instance of `Pinger` should
+    /// be used for as long as possible, altough it might also
+    /// be beneficial to `Drop` the `Pinger` and recreate it if
+    /// you are not going to be sending pings for a long period of time.
     pub fn new() -> io::Result<Self> {
         let raw = RawPinger::new()?;
         let raw_blocking = RawBlockingPinger::new()?;
@@ -184,6 +212,10 @@ impl<V: IpVersion> Pinger<V> {
         Ok(Self { inner })
     }
 
+    /// Ping `addresses`
+    ///
+    /// Creates [`MeasureManyStream`] which **lazily** sends ping
+    /// requests and [`Stream`]s the responses as they arrive.
     pub fn measure_many<I>(&self, addresses: I) -> MeasureManyStream<'_, V, I>
     where
         I: Iterator<Item = V>,
@@ -215,6 +247,15 @@ impl<V: IpVersion> Pinger<V> {
     }
 }
 
+/// A [`Stream`] of ping responses.
+///
+/// No kind of `rtt` timeout is implemented, so an external mechanism
+/// like [`tokio::time::timeout`] should be used to prevent the program
+/// from hanging indefinitely.
+///
+/// Leaking this method might crate a slowly forever growing memory leak.
+///
+/// [`tokio::time::timeout`]: tokio::time::timeout
 pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
     pinger: &'a Pinger<V>,
     send_queue: Peekable<I>,
