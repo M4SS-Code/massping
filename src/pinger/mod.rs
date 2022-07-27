@@ -44,7 +44,7 @@ impl<V: IpVersion> RawPinger<V> {
 
     pub fn poll_send_to(
         &self,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
         addr: V,
         packet: &EchoRequestPacket<V>,
     ) -> Poll<io::Result<()>> {
@@ -63,7 +63,7 @@ impl<V: IpVersion> RawPinger<V> {
 
     pub fn poll_recv(
         &self,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
         buf: &mut [MaybeUninit<u8>],
     ) -> Poll<io::Result<EchoReplyPacket<'_, V>>> {
         let buf = ready!(self.socket.poll_read(cx, buf))?;
@@ -87,7 +87,7 @@ pub struct SendFuture<'a, V: IpVersion> {
 impl<'a, V: IpVersion> Future for SendFuture<'a, V> {
     type Output = io::Result<()>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.pinger.poll_send_to(cx, self.addr, self.packet)
     }
 }
@@ -100,7 +100,7 @@ pub struct RecvFuture<'a, V: IpVersion> {
 impl<'a, V: IpVersion> Future for RecvFuture<'a, V> {
     type Output = io::Result<EchoReplyPacket<'static, V>>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut();
 
         let packet = ready!(this.pinger.poll_recv(cx, this.buf.spare_capacity_mut()))?;

@@ -228,7 +228,7 @@ pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
 }
 
 impl<'a, V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'a, V, I> {
-    pub fn poll_next_unpin(&mut self, cx: &mut Context) -> Poll<(V, Duration)> {
+    pub fn poll_next_unpin(&mut self, cx: &mut Context<'_>) -> Poll<(V, Duration)> {
         // Try to see if another `MeasureManyStream` got it
         if let Poll::Ready(Some((addr, rtt))) = self.poll_next_from_different_round(cx) {
             return Poll::Ready((addr, rtt));
@@ -240,7 +240,7 @@ impl<'a, V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'a, V, I> {
         Poll::Pending
     }
 
-    fn poll_next_icmp_replys(&mut self, cx: &mut Context) {
+    fn poll_next_icmp_replys(&mut self, cx: &mut Context<'_>) {
         while let Some(&addr) = self.send_queue.peek() {
             let mut payload = [0; 64];
             #[cfg(feature = "strong")]
@@ -275,7 +275,10 @@ impl<'a, V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'a, V, I> {
     }
 
     #[cfg_attr(not(feature = "strong"), allow(clippy::never_loop))]
-    fn poll_next_from_different_round(&mut self, cx: &mut Context) -> Poll<Option<(V, Duration)>> {
+    fn poll_next_from_different_round(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<(V, Duration)>> {
         loop {
             match self.receiver.poll_recv(cx) {
                 Poll::Pending => return Poll::Pending,
