@@ -1,4 +1,11 @@
-use std::{borrow::Cow, io, marker::PhantomData, mem::MaybeUninit, time::Duration};
+use std::{
+    borrow::Cow,
+    io,
+    marker::PhantomData,
+    mem::{self, MaybeUninit},
+    net::IpAddr,
+    time::Duration,
+};
 
 use crate::{socket::BaseSocket, EchoReplyPacket, EchoRequestPacket, IpVersion};
 
@@ -23,12 +30,18 @@ impl<V: IpVersion> RawBlockingPinger<V> {
     }
 
     pub fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<Option<EchoReplyPacket<'_, V>>> {
-        let received = match self.socket.recv(buf) {
-            Ok(received) => received,
+        let (received, source) = match self.socket.recv(buf) {
+            Ok((received, source)) => (received, source),
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(err) => return Err(err),
         };
+        let source = match (source.ip(), V::IS_V4) {
+            (IpAddr::V4(v4), true) => unsafe { mem::transmute_copy(&v4) },
+            (IpAddr::V6(v6), false) => unsafe { mem::transmute_copy(&v6) },
+            _ => unreachable!(),
+        };
 
-        Ok(EchoReplyPacket::from_reply(Cow::Borrowed(received)))
+        let packet = EchoReplyPacket::from_reply(source, Cow::Borrowed(received));
+        Ok(packet)
     }
 }

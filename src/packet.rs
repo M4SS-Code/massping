@@ -1,10 +1,9 @@
-use std::{borrow::Cow, marker::PhantomData, mem};
+use std::{borrow::Cow, marker::PhantomData};
 
 use pnet_packet::{
     icmp::{IcmpPacket, IcmpTypes},
     icmpv6::{Icmpv6Packet, Icmpv6Types},
     ipv4::Ipv4Packet,
-    ipv6::Ipv6Packet,
     util, Packet as _,
 };
 
@@ -18,6 +17,7 @@ pub struct EchoRequestPacket<V: IpVersion> {
 
 /// An ICMP echo reply packet
 pub struct EchoReplyPacket<'a, V: IpVersion> {
+    source: V,
     buf: Cow<'a, [u8]>,
     _version: PhantomData<V>,
 }
@@ -74,20 +74,25 @@ impl<V: IpVersion> EchoRequestPacket<V> {
 
 impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
     /// Parse an IP packet containing an ICMP echo reply packet
-    pub(crate) fn from_reply(buf: Cow<'a, [u8]>) -> Option<Self> {
-        if V::IS_V4 && let Some(ip_packet) = Ipv4Packet::new(&buf) && let Some(icmp_packet) = IcmpPacket::new(ip_packet.payload()) && icmp_packet.get_icmp_type() == IcmpTypes::EchoReply {
-           // SAFETY: we just checked that the packet is valid
-            unsafe {Some(Self::from_reply_unchecked(buf))}
-        } else if let Some(ip_packet) = Ipv6Packet::new(&buf) && let Some(icmp_packet) = Icmpv6Packet::new(ip_packet.payload()) && icmp_packet.get_icmpv6_type() == Icmpv6Types::EchoReply {
-            // SAFETY: we just checked that the packet is valid
-            unsafe {Some(Self::from_reply_unchecked(buf))}
+    pub(crate) fn from_reply(source: V, buf: Cow<'a, [u8]>) -> Option<Self> {
+        if V::IS_V4 {
+            if let Some(ip_packet) = Ipv4Packet::new(&buf) && let Some(icmp_packet) = IcmpPacket::new(ip_packet.payload()) && icmp_packet.get_icmp_type() == IcmpTypes::EchoReply {
+                // SAFETY: we just checked that the packet is valid
+                return Some(unsafe {Self::from_reply_unchecked(source,buf)});
+             }
         } else {
-            None
+            if let Some(icmp_packet) = Icmpv6Packet::new(&buf) && icmp_packet.get_icmpv6_type() == Icmpv6Types::EchoReply {
+                // SAFETY: we just checked that the packet is valid
+                return Some(unsafe {Self::from_reply_unchecked(source,buf)});
+            }
         }
+
+        None
     }
 
-    pub(crate) unsafe fn from_reply_unchecked(buf: Cow<'a, [u8]>) -> Self {
+    pub(crate) unsafe fn from_reply_unchecked(source: V, buf: Cow<'a, [u8]>) -> Self {
         Self {
+            source,
             buf,
             _version: PhantomData,
         }
@@ -95,21 +100,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
 
     /// Get the source IP address
     pub fn source(&self) -> V {
-        if V::IS_V4 {
-            // SAFETY: the check has already been done by the builder
-            let packet = unsafe { Ipv4Packet::new(&self.buf).unwrap_unchecked() };
-            let source = packet.get_source();
-
-            // SAFETY: we are transmuting to itself
-            unsafe { mem::transmute_copy(&source) }
-        } else {
-            // SAFETY: the check has already been done by the builder
-            let packet = unsafe { Ipv6Packet::new(&self.buf).unwrap_unchecked() };
-            let source = packet.get_source();
-
-            // SAFETY: we are transmuting to itself
-            unsafe { mem::transmute_copy(&source) }
-        }
+        self.source
     }
 
     /// Get the ICMP packet identifier
@@ -126,9 +117,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
             use pnet_packet::icmpv6::echo_reply::EchoReplyPacket;
 
             // SAFETY: the check has already been done by the builder
-            let packet = unsafe { Ipv6Packet::new(&self.buf).unwrap_unchecked() };
-            // SAFETY: the check has already been done by the builder
-            let packet = unsafe { EchoReplyPacket::new(packet.payload()).unwrap_unchecked() };
+            let packet = unsafe { EchoReplyPacket::new(&self.buf).unwrap_unchecked() };
             packet.get_identifier()
         }
     }
@@ -147,9 +136,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
             use pnet_packet::icmpv6::echo_reply::EchoReplyPacket;
 
             // SAFETY: the check has already been done by the builder
-            let packet = unsafe { Ipv6Packet::new(&self.buf).unwrap_unchecked() };
-            // SAFETY: the check has already been done by the builder
-            let packet = unsafe { EchoReplyPacket::new(packet.payload()).unwrap_unchecked() };
+            let packet = unsafe { EchoReplyPacket::new(&self.buf).unwrap_unchecked() };
             packet.get_sequence_number()
         }
     }

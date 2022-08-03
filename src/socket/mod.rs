@@ -28,12 +28,12 @@ impl Socket {
         &self,
         cx: &mut Context<'_>,
         buf: &mut [MaybeUninit<u8>],
-    ) -> Poll<io::Result<&[u8]>> {
+    ) -> Poll<io::Result<(&[u8], SocketAddr)>> {
         loop {
             let mut guard = ready!(self.fd.poll_read_ready(cx))?;
 
             match guard.try_io(|inner| inner.get_ref().recv(buf)) {
-                Ok(Ok(buf)) => return Poll::Ready(Ok(buf)),
+                Ok(Ok((buf, source))) => return Poll::Ready(Ok((buf, source))),
                 Ok(Err(err)) => return Poll::Ready(Err(err)),
                 Err(_) => continue,
             }

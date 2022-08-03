@@ -43,10 +43,13 @@ impl BaseSocket {
         socket2::Socket::new(Domain::IPV6, Type::RAW, Some(Protocol::ICMPV6))
     }
 
-    pub fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<&'_ [u8]> {
-        self.socket
-            .recv(buf)
-            .map(|filled| unsafe { slice::from_raw_parts(buf.as_ptr().cast::<u8>(), filled) })
+    pub fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<(&'_ [u8], SocketAddr)> {
+        self.socket.recv_from(buf).map(|(filled, source)| {
+            (
+                unsafe { slice::from_raw_parts(buf.as_ptr().cast::<u8>(), filled) },
+                source.as_socket().expect("SockAddr is an IP socket"),
+            )
+        })
     }
 
     pub fn send_to(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {

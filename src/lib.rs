@@ -131,8 +131,8 @@ impl<V: IpVersion> Pinger<V> {
                 u16,
                 mpsc::UnboundedSender<(V, Instant, Instant)>,
             > = HashMap::new();
-            'packets: while let Ok(packet) = raw_blocking.recv(&mut buf) {
-                let packet = match packet {
+            'packets: while let Ok(tuple) = raw_blocking.recv(&mut buf) {
+                let packet = match tuple {
                     Some(packet) if packet.identifier() == identifier => packet,
                     _ => continue 'packets,
                 };

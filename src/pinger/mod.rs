@@ -4,7 +4,7 @@ use std::{
     io,
     marker::PhantomData,
     mem::{self, MaybeUninit},
-    net::{Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -66,9 +66,14 @@ impl<V: IpVersion> RawPinger<V> {
         cx: &mut Context<'_>,
         buf: &mut [MaybeUninit<u8>],
     ) -> Poll<io::Result<EchoReplyPacket<'_, V>>> {
-        let buf = ready!(self.socket.poll_read(cx, buf))?;
+        let (buf, source) = ready!(self.socket.poll_read(cx, buf))?;
+        let source = match (source.ip(), V::IS_V4) {
+            (IpAddr::V4(v4), true) => unsafe { mem::transmute_copy(&v4) },
+            (IpAddr::V6(v6), false) => unsafe { mem::transmute_copy(&v6) },
+            _ => unreachable!(),
+        };
 
-        match EchoReplyPacket::from_reply(Cow::Borrowed(buf)) {
+        match EchoReplyPacket::from_reply(source, Cow::Borrowed(buf)) {
             Some(packet) => Poll::Ready(Ok(packet)),
             None => {
                 cx.waker().wake_by_ref();
@@ -104,6 +109,7 @@ impl<'a, V: IpVersion> Future for RecvFuture<'a, V> {
         let mut this = self.as_mut();
 
         let packet = ready!(this.pinger.poll_recv(cx, this.buf.spare_capacity_mut()))?;
+        let source = packet.source();
         let filled_buf_len = packet.as_bytes().len();
 
         // SAFETY: `poll_recv` guarantees that `filled_buf_len` have been filled
@@ -114,7 +120,7 @@ impl<'a, V: IpVersion> Future for RecvFuture<'a, V> {
         let buf = mem::replace(&mut this.buf, Vec::with_capacity(1600));
         // SAFETY: `RawPinger` already checked that the packet is valid
         Poll::Ready(Ok(unsafe {
-            EchoReplyPacket::from_reply_unchecked(Cow::Owned(buf))
+            EchoReplyPacket::from_reply_unchecked(source, Cow::Owned(buf))
         }))
     }
 }
