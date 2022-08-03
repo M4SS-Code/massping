@@ -78,13 +78,11 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
         if V::IS_V4 {
             if let Some(ip_packet) = Ipv4Packet::new(&buf) && let Some(icmp_packet) = IcmpPacket::new(ip_packet.payload()) && icmp_packet.get_icmp_type() == IcmpTypes::EchoReply {
                 // SAFETY: we just checked that the packet is valid
-                return Some(unsafe {Self::from_reply_unchecked(source,buf)});
+                return Some(unsafe { Self::from_reply_unchecked(source, buf) });
              }
-        } else {
-            if let Some(icmp_packet) = Icmpv6Packet::new(&buf) && icmp_packet.get_icmpv6_type() == Icmpv6Types::EchoReply {
-                // SAFETY: we just checked that the packet is valid
-                return Some(unsafe {Self::from_reply_unchecked(source,buf)});
-            }
+        } else if let Some(icmp_packet) = Icmpv6Packet::new(&buf) && icmp_packet.get_icmpv6_type() == Icmpv6Types::EchoReply {
+            // SAFETY: we just checked that the packet is valid
+            return Some(unsafe { Self::from_reply_unchecked(source, buf) });
         }
 
         None
