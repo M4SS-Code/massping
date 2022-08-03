@@ -141,8 +141,24 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
 
     /// Get the ICMP packet payload
     pub fn payload(&self) -> &[u8] {
+        let payload_len = if V::IS_V4 {
+            use pnet_packet::icmp::echo_reply::EchoReplyPacket;
+
+            // SAFETY: the check has already been done by the builder
+            let packet = unsafe { Ipv4Packet::new(&self.buf).unwrap_unchecked() };
+            // SAFETY: the check has already been done by the builder
+            let packet = unsafe { EchoReplyPacket::new(packet.payload()).unwrap_unchecked() };
+            packet.payload().len()
+        } else {
+            use pnet_packet::icmpv6::echo_reply::EchoReplyPacket;
+
+            // SAFETY: the check has already been done by the builder
+            let packet = unsafe { EchoReplyPacket::new(&self.buf).unwrap_unchecked() };
+            packet.payload().len()
+        };
+
         // TODO: Fix
-        &self.buf[self.buf.len() - 64..]
+        &self.buf[self.buf.len() - payload_len..]
     }
 
     pub(crate) fn as_bytes(&self) -> &[u8] {
