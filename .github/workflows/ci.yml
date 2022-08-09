@@ -59,8 +59,8 @@ jobs:
         include:
           #- name: stable
           #  rust: stable
-          #- name: beta
-          #  rust: beta
+          - name: beta
+            rust: beta
           - name: nightly
             rust: nightly
           #- name: MSRV 1.64
