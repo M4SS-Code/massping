@@ -218,6 +218,7 @@ impl<V: IpVersion> Pinger<V> {
 ///
 /// Leaking this method might crate a slowly forever growing memory leak.
 ///
+/// [`Stream`]: futures_core::Stream
 /// [`tokio::time::timeout`]: tokio::time::timeout
 pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
     pinger: &'a Pinger<V>,

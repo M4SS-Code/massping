@@ -105,6 +105,7 @@ impl DualstackPinger {
 ///
 /// Leaking this method might crate a slowly forever growing memory leak.
 ///
+/// [`Stream`]: futures_core::Stream
 /// [`tokio::time::timeout`]: tokio::time::timeout
 pub struct DualstackMeasureManyStream<'a, I: Iterator<Item = IpAddr>> {
     v4: MeasureManyStream<'a, Ipv4Addr, FilterIpAddr<I, Ipv4Addr>>,
