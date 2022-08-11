@@ -1,3 +1,7 @@
+//! ICMP packets implementation used by [`raw_pinger`].
+//!
+//! [`raw_pinger`]: crate::raw_pinger
+
 use std::{borrow::Cow, marker::PhantomData};
 
 use pnet_packet::{

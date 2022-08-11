@@ -1,3 +1,5 @@
+//! Synchronous and asynchronous raw pinger implementation
+
 use std::{
     borrow::Cow,
     future::Future,
@@ -23,6 +25,7 @@ pub type RawV6Pinger = RawPinger<Ipv6Addr>;
 
 mod blocking;
 
+/// Asynchronous pinger
 pub struct RawPinger<V: IpVersion> {
     socket: Socket,
     _version: PhantomData<V>,
@@ -38,6 +41,7 @@ impl<V: IpVersion> RawPinger<V> {
         })
     }
 
+    /// Send a ICMP ECHO request packet
     pub fn send_to<'a>(&'a self, addr: V, packet: &'a EchoRequestPacket<V>) -> SendFuture<'a, V> {
         SendFuture {
             pinger: self,
@@ -46,6 +50,7 @@ impl<V: IpVersion> RawPinger<V> {
         }
     }
 
+    /// Send a ICMP ECHO request packet
     pub fn poll_send_to(
         &self,
         cx: &mut Context<'_>,
@@ -58,6 +63,7 @@ impl<V: IpVersion> RawPinger<V> {
         Poll::Ready(result.map(|_sent| ()))
     }
 
+    /// Receive an ICMP ECHO reply packet
     pub fn recv(&self) -> RecvFuture<'_, V> {
         RecvFuture {
             pinger: self,
@@ -65,6 +71,7 @@ impl<V: IpVersion> RawPinger<V> {
         }
     }
 
+    /// Receive an ICMP ECHO reply packet
     pub fn poll_recv(
         &self,
         cx: &mut Context<'_>,
@@ -87,6 +94,7 @@ impl<V: IpVersion> RawPinger<V> {
     }
 }
 
+/// [`Future`] obtained from [`RawPinger::send_to`].
 pub struct SendFuture<'a, V: IpVersion> {
     pinger: &'a RawPinger<V>,
     addr: V,
@@ -101,6 +109,7 @@ impl<'a, V: IpVersion> Future for SendFuture<'a, V> {
     }
 }
 
+/// [`Future`] obtained from [`RawPinger::recv`].
 pub struct RecvFuture<'a, V: IpVersion> {
     pinger: &'a RawPinger<V>,
     buf: Vec<u8>,

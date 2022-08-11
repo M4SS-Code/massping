@@ -13,6 +13,7 @@ use crate::{
     IpVersion,
 };
 
+/// Synchronous pinger
 pub struct RawBlockingPinger<V: IpVersion> {
     socket: BaseSocket,
     _version: PhantomData<V>,
@@ -28,11 +29,13 @@ impl<V: IpVersion> RawBlockingPinger<V> {
         })
     }
 
+    /// Send a ICMP ECHO request packet
     pub fn send_to(&self, addr: V, packet: &EchoRequestPacket<V>) -> io::Result<()> {
         let addr = addr.to_socket_addr();
         self.socket.send_to(packet.as_bytes(), addr).map(|_sent| ())
     }
 
+    /// Receive an ICMP ECHO reply packet
     pub fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<Option<EchoReplyPacket<'_, V>>> {
         let (received, source) = match self.socket.recv(buf) {
             Ok((received, source)) => (received, source),

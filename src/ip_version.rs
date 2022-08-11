@@ -1,13 +1,10 @@
 use std::{
-    fmt::Display,
     hash::Hash,
     net::{Ipv4Addr, Ipv6Addr},
 };
 
-pub trait IpVersion:
-    Copy + Sized + Hash + Eq + Unpin + Send + Sync + Display + 'static + private::Sealed
-{
-}
+/// Either an [`Ipv4Addr`] or an [`Ipv6Addr`].
+pub trait IpVersion: Copy + Hash + Eq + Unpin + Send + Sync + 'static + private::Sealed {}
 
 impl IpVersion for Ipv4Addr {}
 impl IpVersion for Ipv6Addr {}
