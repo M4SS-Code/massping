@@ -77,6 +77,8 @@ impl DualstackPinger {
     ///
     /// Creates [`DualstackMeasureManyStream`] which **lazily** sends ping
     /// requests and [`Stream`]s the responses as they arrive.
+    ///
+    /// [`Stream`]: futures_core::Stream
     pub fn measure_many<I>(&self, addresses: I) -> DualstackMeasureManyStream<'_, I>
     where
         I: Iterator<Item = IpAddr> + Clone,

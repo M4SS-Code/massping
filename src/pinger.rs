@@ -179,6 +179,8 @@ impl<V: IpVersion> Pinger<V> {
     ///
     /// Creates [`MeasureManyStream`] which **lazily** sends ping
     /// requests and [`Stream`]s the responses as they arrive.
+    ///
+    /// [`Stream`]: futures_core::Stream
     pub fn measure_many<I>(&self, addresses: I) -> MeasureManyStream<'_, V, I>
     where
         I: Iterator<Item = V>,
