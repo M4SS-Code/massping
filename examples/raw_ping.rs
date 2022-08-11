@@ -6,7 +6,7 @@ use std::{
 
 use massping::{
     packet::EchoRequestPacket,
-    pinger::{RawV4Pinger, RawV6Pinger},
+    raw_pinger::{RawV4Pinger, RawV6Pinger},
 };
 use tokio::time;
 
