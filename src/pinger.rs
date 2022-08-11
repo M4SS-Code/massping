@@ -94,80 +94,116 @@ impl<V: IpVersion> Pinger<V> {
                 u16,
                 mpsc::UnboundedSender<(V, Instant, Instant)>,
             > = HashMap::new();
-            'packets: while let Ok(tuple) = raw_blocking.recv(&mut buf) {
-                let packet = match tuple {
-                    Some(packet) if packet.identifier() == identifier => packet,
-                    _ => continue 'packets,
-                };
-
-                let recv_instant = Instant::now();
-
-                #[cfg(not(feature = "strong"))]
-                let send_instant = {
-                    let payload = packet.payload();
-                    match Instant::decode(payload[..Instant::ENCODED_LEN].try_into().unwrap()) {
-                        Some(send_instant) => send_instant,
-                        None => continue 'packets,
-                    }
-                };
-
-                let packet_source = packet.source();
-                let packet_sequence_number = packet.sequence_number();
-                match subscribers.get(&packet_sequence_number) {
-                    Some(subscriber) => {
-                        #[cfg(feature = "strong")]
-                        if subscriber.send((packet_source, recv_instant)).is_err() {
-                            // Closed
-                            subscribers.remove(&packet_sequence_number);
-                        }
+            'packets: while let Ok(maybe_packet) = raw_blocking.recv(&mut buf) {
+                match &maybe_packet {
+                    Some(packet) if packet.identifier() == identifier => {
+                        let recv_instant = Instant::now();
 
                         #[cfg(not(feature = "strong"))]
-                        if subscriber
-                            .send((packet_source, send_instant, recv_instant))
-                            .is_err()
-                        {
-                            // Closed
-                            subscribers.remove(&packet_sequence_number);
-                        }
-                    }
-                    None => 'registrations: loop {
-                        match receiver.try_recv() {
-                            Ok(RoundMessage::Subscribe {
-                                sequence_number,
-                                sender,
-                            }) => {
-                                if packet_sequence_number == sequence_number {
-                                    // Packet matches
+                        let send_instant = {
+                            let payload = packet.payload();
+                            match Instant::decode(
+                                payload[..Instant::ENCODED_LEN].try_into().unwrap(),
+                            ) {
+                                Some(send_instant) => send_instant,
+                                None => continue 'packets,
+                            }
+                        };
 
-                                    #[cfg(feature = "strong")]
-                                    if sender.send((packet_source, recv_instant)).is_err() {
-                                        // Closed
-                                        continue 'registrations;
-                                    }
-
-                                    #[cfg(not(feature = "strong"))]
-                                    if sender
-                                        .send((packet_source, send_instant, recv_instant))
-                                        .is_err()
-                                    {
-                                        // Closed
-                                        continue 'registrations;
-                                    }
+                        let packet_source = packet.source();
+                        let packet_sequence_number = packet.sequence_number();
+                        match subscribers.get(&packet_sequence_number) {
+                            Some(subscriber) => {
+                                #[cfg(feature = "strong")]
+                                if subscriber.send((packet_source, recv_instant)).is_err() {
+                                    // Closed
+                                    subscribers.remove(&packet_sequence_number);
                                 }
 
-                                subscribers.insert(sequence_number, sender);
+                                #[cfg(not(feature = "strong"))]
+                                if subscriber
+                                    .send((packet_source, send_instant, recv_instant))
+                                    .is_err()
+                                {
+                                    // Closed
+                                    subscribers.remove(&packet_sequence_number);
+                                }
+
+                                continue 'packets;
                             }
-                            Ok(RoundMessage::Unsubscribe { sequence_number }) => {
-                                drop(subscribers.remove(&sequence_number));
-                            }
-                            Err(TryRecvError::Empty) => {
-                                break 'registrations;
-                            }
-                            Err(TryRecvError::Disconnected) => {
-                                break 'packets;
+                            None => {
+                                // TODO: fix this duplication
+                                'registrations: loop {
+                                    match receiver.try_recv() {
+                                        Ok(RoundMessage::Subscribe {
+                                            sequence_number,
+                                            sender,
+                                        }) => {
+                                            if packet_sequence_number == sequence_number {
+                                                // Packet matches
+
+                                                #[cfg(feature = "strong")]
+                                                if sender
+                                                    .send((packet_source, recv_instant))
+                                                    .is_err()
+                                                {
+                                                    // Closed
+                                                    continue 'registrations;
+                                                }
+
+                                                #[cfg(not(feature = "strong"))]
+                                                if sender
+                                                    .send((
+                                                        packet_source,
+                                                        send_instant,
+                                                        recv_instant,
+                                                    ))
+                                                    .is_err()
+                                                {
+                                                    // Closed
+                                                    continue 'registrations;
+                                                }
+                                            }
+
+                                            subscribers.insert(sequence_number, sender);
+                                        }
+                                        Ok(RoundMessage::Unsubscribe { sequence_number }) => {
+                                            drop(subscribers.remove(&sequence_number));
+                                        }
+                                        Err(TryRecvError::Empty) => {
+                                            break 'registrations;
+                                        }
+                                        Err(TryRecvError::Disconnected) => {
+                                            break 'packets;
+                                        }
+                                    }
+                                }
                             }
                         }
-                    },
+                    }
+                    Some(_packet) => {}
+                    None => {
+                        // TODO: fix this duplication
+                        'registrations: loop {
+                            match receiver.try_recv() {
+                                Ok(RoundMessage::Subscribe {
+                                    sequence_number,
+                                    sender,
+                                }) => {
+                                    subscribers.insert(sequence_number, sender);
+                                }
+                                Ok(RoundMessage::Unsubscribe { sequence_number }) => {
+                                    drop(subscribers.remove(&sequence_number));
+                                }
+                                Err(TryRecvError::Empty) => {
+                                    break 'registrations;
+                                }
+                                Err(TryRecvError::Disconnected) => {
+                                    break 'packets;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         });
