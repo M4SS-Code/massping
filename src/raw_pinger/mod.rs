@@ -10,7 +10,11 @@ use std::{
 };
 
 pub use self::blocking::RawBlockingPinger;
-use crate::{socket::Socket, EchoReplyPacket, EchoRequestPacket, IpVersion};
+use crate::{
+    packet::{EchoReplyPacket, EchoRequestPacket},
+    socket::Socket,
+    IpVersion,
+};
 
 pub type RawV4BlockingPinger = RawBlockingPinger<Ipv4Addr>;
 pub type RawV6BlockingPinger = RawBlockingPinger<Ipv6Addr>;

@@ -7,7 +7,11 @@ use std::{
     time::Duration,
 };
 
-use crate::{socket::BaseSocket, EchoReplyPacket, EchoRequestPacket, IpVersion};
+use crate::{
+    packet::{EchoReplyPacket, EchoRequestPacket},
+    socket::BaseSocket,
+    IpVersion,
+};
 
 pub struct RawBlockingPinger<V: IpVersion> {
     socket: BaseSocket,
