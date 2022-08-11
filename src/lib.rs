@@ -58,7 +58,7 @@ use self::instant::Instant;
 pub use self::ip_version::IpVersion;
 use self::{
     packet::{EchoReplyPacket, EchoRequestPacket},
-    pinger::{RawBlockingPinger, RawPinger},
+    raw_pinger::{RawBlockingPinger, RawPinger},
 };
 
 /// A pinger for IPv4 addresses
@@ -70,7 +70,7 @@ pub type V6Pinger = Pinger<Ipv6Addr>;
 mod instant;
 mod ip_version;
 pub mod packet;
-pub mod pinger;
+pub mod raw_pinger;
 mod socket;
 
 /// A pinger for [`IpVersion`] (either [`Ipv4Addr`] or [`Ipv6Addr`]).
