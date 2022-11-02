@@ -11,6 +11,7 @@ use std::{
         Arc,
     },
     task::{Context, Poll},
+    thread,
     time::Duration,
 };
 #[cfg(feature = "stream")]
@@ -94,7 +95,15 @@ impl<V: IpVersion> Pinger<V> {
                 u16,
                 mpsc::UnboundedSender<(V, Instant, Instant)>,
             > = HashMap::new();
-            'packets: while let Ok(maybe_packet) = raw_blocking.recv(&mut buf) {
+            'packets: loop {
+                let maybe_packet = match raw_blocking.recv(&mut buf) {
+                    Ok(maybe_packet) => maybe_packet,
+                    Err(_err) => {
+                        thread::yield_now();
+                        continue 'packets;
+                    }
+                };
+
                 match &maybe_packet {
                     Some(packet) if packet.identifier() == identifier => {
                         let recv_instant = Instant::now();
