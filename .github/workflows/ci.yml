@@ -52,7 +52,7 @@ jobs:
           - name: nightly
             rust: nightly
           - name: MSRV 1.70
-            rust: 1.70
+            rust: '1.70'
 
     steps:
       - uses: actions/checkout@v4
