@@ -279,7 +279,7 @@ pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
     sequence_number: u16,
 }
 
-impl<'a, V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'a, V, I> {
+impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
     pub fn poll_next_unpin(&mut self, cx: &mut Context<'_>) -> Poll<(V, Duration)> {
         // Try to see if another `MeasureManyStream` got it
         if let Poll::Ready(Some((addr, rtt))) = self.poll_next_from_different_round(cx) {
@@ -353,7 +353,7 @@ impl<'a, V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'a, V, I> {
 }
 
 #[cfg(feature = "stream")]
-impl<'a, V: IpVersion, I: Iterator<Item = V> + Unpin> Stream for MeasureManyStream<'a, V, I> {
+impl<V: IpVersion, I: Iterator<Item = V> + Unpin> Stream for MeasureManyStream<'_, V, I> {
     type Item = (V, Duration);
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -362,7 +362,7 @@ impl<'a, V: IpVersion, I: Iterator<Item = V> + Unpin> Stream for MeasureManyStre
     }
 }
 
-impl<'a, V: IpVersion, I: Iterator<Item = V>> Drop for MeasureManyStream<'a, V, I> {
+impl<V: IpVersion, I: Iterator<Item = V>> Drop for MeasureManyStream<'_, V, I> {
     fn drop(&mut self) {
         let _ = self
             .pinger

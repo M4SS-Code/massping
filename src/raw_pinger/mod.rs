@@ -101,7 +101,7 @@ pub struct SendFuture<'a, V: IpVersion> {
     packet: &'a EchoRequestPacket<V>,
 }
 
-impl<'a, V: IpVersion> Future for SendFuture<'a, V> {
+impl<V: IpVersion> Future for SendFuture<'_, V> {
     type Output = io::Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -115,7 +115,7 @@ pub struct RecvFuture<'a, V: IpVersion> {
     buf: Vec<u8>,
 }
 
-impl<'a, V: IpVersion> Future for RecvFuture<'a, V> {
+impl<V: IpVersion> Future for RecvFuture<'_, V> {
     type Output = io::Result<EchoReplyPacket<'static, V>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

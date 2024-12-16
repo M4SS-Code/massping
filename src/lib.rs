@@ -114,7 +114,7 @@ pub struct DualstackMeasureManyStream<'a, I: Iterator<Item = IpAddr>> {
     v6: MeasureManyStream<'a, Ipv6Addr, FilterIpAddr<I, Ipv6Addr>>,
 }
 
-impl<'a, I: Iterator<Item = IpAddr>> DualstackMeasureManyStream<'a, I> {
+impl<I: Iterator<Item = IpAddr>> DualstackMeasureManyStream<'_, I> {
     pub fn poll_next_unpin(&mut self, cx: &mut Context<'_>) -> Poll<(IpAddr, Duration)> {
         if let Poll::Ready((v4, rtt)) = self.v4.poll_next_unpin(cx) {
             return Poll::Ready((IpAddr::V4(v4), rtt));
@@ -129,7 +129,7 @@ impl<'a, I: Iterator<Item = IpAddr>> DualstackMeasureManyStream<'a, I> {
 }
 
 #[cfg(feature = "stream")]
-impl<'a, I: Iterator<Item = IpAddr> + Unpin> Stream for DualstackMeasureManyStream<'a, I> {
+impl<I: Iterator<Item = IpAddr> + Unpin> Stream for DualstackMeasureManyStream<'_, I> {
     type Item = (IpAddr, Duration);
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
