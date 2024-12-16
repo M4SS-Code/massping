@@ -15,7 +15,7 @@ features = ["tokio/time"]
 all-features = true
 
 [dependencies]
-pnet_packet = "0.33"
+pnet_packet = "0.35"
 socket2 = { version = "0.5.1", features = ["all"] }
 
 getrandom = "0.2"
