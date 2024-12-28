@@ -6,9 +6,6 @@ on:
     branches:
       - main
 
-env:
-  CARGO_UNSTABLE_SPARSE_REGISTRY: true
-
 jobs:
   fmt:
     name: rustfmt / stable
