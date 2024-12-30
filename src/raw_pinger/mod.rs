@@ -6,7 +6,7 @@ use std::{
     io,
     marker::PhantomData,
     mem::{self, MaybeUninit},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -57,7 +57,7 @@ impl<V: IpVersion> RawPinger<V> {
         addr: V,
         packet: &EchoRequestPacket<V>,
     ) -> Poll<io::Result<()>> {
-        let addr = addr.to_socket_addr();
+        let addr = SocketAddr::new(addr.into(), 0);
 
         let result = ready!(self.socket.poll_write_to(cx, packet.as_bytes(), addr));
         Poll::Ready(result.map(|_sent| ()))

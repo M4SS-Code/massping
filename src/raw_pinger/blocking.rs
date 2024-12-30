@@ -3,7 +3,7 @@ use std::{
     io,
     marker::PhantomData,
     mem::{self, MaybeUninit},
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     time::Duration,
 };
 
@@ -31,7 +31,7 @@ impl<V: IpVersion> RawBlockingPinger<V> {
 
     /// Send a ICMP ECHO request packet
     pub fn send_to(&self, addr: V, packet: &EchoRequestPacket<V>) -> io::Result<()> {
-        let addr = addr.to_socket_addr();
+        let addr = SocketAddr::new(addr.into(), 0);
         self.socket.send_to(packet.as_bytes(), addr).map(|_sent| ())
     }
 
