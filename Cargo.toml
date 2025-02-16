@@ -18,7 +18,7 @@ all-features = true
 pnet_packet = "0.35"
 socket2 = { version = "0.5.1", features = ["all"] }
 
-getrandom = "0.2"
+getrandom = "0.3.1"
 tokio = { version = "1.15", features = ["net", "sync", "rt"] }
 
 # weak

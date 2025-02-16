@@ -74,7 +74,7 @@ impl<V: IpVersion> Pinger<V> {
         let raw_blocking = RawBlockingPinger::new()?;
 
         let mut identifier = [0; 2];
-        getrandom::getrandom(&mut identifier).expect("run getrandom");
+        getrandom::fill(&mut identifier).expect("run getrandom");
         let identifier = u16::from_ne_bytes(identifier);
 
         let (sender, mut receiver) = mpsc::unbounded_channel();
@@ -296,7 +296,7 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
         while let Some(&addr) = self.send_queue.peek() {
             let mut payload = [0; 64];
             #[cfg(feature = "strong")]
-            getrandom::getrandom(&mut payload).expect("generate random payload");
+            getrandom::fill(&mut payload).expect("generate random payload");
             #[cfg(not(feature = "strong"))]
             {
                 let now = Instant::now().encode();

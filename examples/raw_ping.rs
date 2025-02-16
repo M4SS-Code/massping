@@ -28,7 +28,7 @@ async fn main() {
         tokio::spawn(async move {
             for addr in [localhost_v4, one_one_one_one_v4, not_answering_v4] {
                 let mut payload = [0; 256];
-                getrandom::getrandom(&mut payload).unwrap();
+                getrandom::fill(&mut payload).unwrap();
 
                 let packet = EchoRequestPacket::new(1, 1, &payload);
                 println!("Send ICMP v4 ping to {}", addr);
@@ -44,7 +44,7 @@ async fn main() {
         tokio::spawn(async move {
             for addr in [localhost_v6, one_one_one_one_v6] {
                 let mut payload = [0; 256];
-                getrandom::getrandom(&mut payload).unwrap();
+                getrandom::fill(&mut payload).unwrap();
 
                 let packet = EchoRequestPacket::new(1, 1, &payload);
                 println!("Send ICMP v6 ping to {}", addr);
