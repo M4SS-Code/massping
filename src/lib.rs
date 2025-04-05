@@ -24,6 +24,7 @@
 
 #![deny(
     rust_2018_idioms,
+    unreachable_pub,
     clippy::doc_markdown,
     rustdoc::broken_intra_doc_links
 )]

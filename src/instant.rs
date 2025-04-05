@@ -4,13 +4,13 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ReferenceInstant {
+pub(crate) struct ReferenceInstant {
     #[cfg(not(feature = "strong"))]
     instant: Instant,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct RelativeInstant {
+pub(crate) struct RelativeInstant {
     #[cfg(feature = "strong")]
     relative: Instant,
     #[cfg(not(feature = "strong"))]
@@ -18,14 +18,14 @@ pub struct RelativeInstant {
 }
 
 impl ReferenceInstant {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             #[cfg(not(feature = "strong"))]
             instant: Instant::now(),
         }
     }
 
-    pub fn now(&self) -> RelativeInstant {
+    pub(crate) fn now(&self) -> RelativeInstant {
         RelativeInstant {
             #[cfg(feature = "strong")]
             relative: Instant::now(),
@@ -37,10 +37,10 @@ impl ReferenceInstant {
 
 impl RelativeInstant {
     #[cfg(not(feature = "strong"))]
-    pub const ENCODED_LEN: usize = 12;
+    pub(crate) const ENCODED_LEN: usize = 12;
 
     #[cfg(not(feature = "strong"))]
-    pub fn encode(&self) -> [u8; Self::ENCODED_LEN] {
+    pub(crate) fn encode(&self) -> [u8; Self::ENCODED_LEN] {
         let mut buf = [0u8; Self::ENCODED_LEN];
         let (secs, nanos) = buf.split_at_mut(8);
         secs.copy_from_slice(&self.relative.as_secs().to_ne_bytes());
@@ -50,7 +50,7 @@ impl RelativeInstant {
     }
 
     #[cfg(not(feature = "strong"))]
-    pub fn decode(buf: &[u8; Self::ENCODED_LEN]) -> Option<Self> {
+    pub(crate) fn decode(buf: &[u8; Self::ENCODED_LEN]) -> Option<Self> {
         let (secs, nanos) = buf.split_at(8);
         let secs = u64::from_ne_bytes(secs.try_into().unwrap());
         let nanos = u32::from_ne_bytes(nanos.try_into().unwrap());

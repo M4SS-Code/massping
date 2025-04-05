@@ -11,12 +11,12 @@ use socket2::{Domain, Protocol, SockAddr, Type};
 
 use crate::IpVersion;
 
-pub struct BaseSocket {
+pub(crate) struct BaseSocket {
     socket: socket2::Socket,
 }
 
 impl BaseSocket {
-    pub fn new_icmp<V: IpVersion>(
+    pub(crate) fn new_icmp<V: IpVersion>(
         blocking: bool,
         read_timeout: Option<Duration>,
     ) -> io::Result<Self> {
@@ -43,7 +43,7 @@ impl BaseSocket {
         socket2::Socket::new(Domain::IPV6, Type::RAW, Some(Protocol::ICMPV6))
     }
 
-    pub fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<(&'_ [u8], SocketAddr)> {
+    pub(crate) fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<(&'_ [u8], SocketAddr)> {
         self.socket.recv_from(buf).map(|(filled, source)| {
             (
                 unsafe { slice::from_raw_parts(buf.as_ptr().cast::<u8>(), filled) },
@@ -52,7 +52,7 @@ impl BaseSocket {
         })
     }
 
-    pub fn send_to(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
+    pub(crate) fn send_to(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
         let addr = SockAddr::from(addr);
 
         self.socket.send_to(buf, &addr)

@@ -7,24 +7,24 @@ use std::{
 
 use tokio::io::unix::AsyncFd;
 
-pub use self::base::BaseSocket;
+pub(crate) use self::base::BaseSocket;
 use crate::IpVersion;
 
 mod base;
 
-pub struct Socket {
+pub(crate) struct Socket {
     fd: AsyncFd<BaseSocket>,
 }
 
 impl Socket {
-    pub fn new_icmp<V: IpVersion>() -> io::Result<Self> {
+    pub(crate) fn new_icmp<V: IpVersion>() -> io::Result<Self> {
         let base = BaseSocket::new_icmp::<V>(false, None)?;
 
         let fd = AsyncFd::new(base)?;
         Ok(Self { fd })
     }
 
-    pub fn poll_read(
+    pub(crate) fn poll_read(
         &self,
         cx: &mut Context<'_>,
         buf: &mut [MaybeUninit<u8>],
@@ -40,7 +40,7 @@ impl Socket {
         }
     }
 
-    pub fn poll_write_to(
+    pub(crate) fn poll_write_to(
         &self,
         cx: &mut Context<'_>,
         buf: &[u8],
