@@ -19,7 +19,7 @@ pnet_packet = "0.35"
 socket2 = { version = "0.5.1", features = ["all"] }
 
 getrandom = "0.3.1"
-tokio = { version = "1.15", features = ["net", "sync", "rt"] }
+tokio = { version = "1.25", features = ["net", "sync", "rt"] }
 
 # weak
 libc = "0.2"
@@ -28,7 +28,7 @@ libc = "0.2"
 futures-core = { version = "0.3", optional = true }
 
 [dev-dependencies]
-tokio = { version = "1.14", features = ["macros", "time"] }
+tokio = { version = "1.25", features = ["macros", "time"] }
 futures-util = { version = "0.3", default-features = false }
 
 [features]
