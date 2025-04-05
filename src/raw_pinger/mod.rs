@@ -6,7 +6,7 @@ use std::{
     io,
     marker::PhantomData,
     mem::{self, MaybeUninit},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -78,12 +78,7 @@ impl<V: IpVersion> RawPinger<V> {
         buf: &mut [MaybeUninit<u8>],
     ) -> Poll<io::Result<EchoReplyPacket<'_, V>>> {
         let (buf, source) = ready!(self.socket.poll_read(cx, buf))?;
-        let source = match (source.ip(), V::IS_V4) {
-            (IpAddr::V4(v4), true) => unsafe { mem::transmute_copy(&v4) },
-            (IpAddr::V6(v6), false) => unsafe { mem::transmute_copy(&v6) },
-            _ => unreachable!(),
-        };
-
+        let source = V::from_ip_addr(source.ip()).unwrap();
         match EchoReplyPacket::from_reply(source, Cow::Borrowed(buf)) {
             Some(packet) => Poll::Ready(Ok(packet)),
             None => {

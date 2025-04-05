@@ -1,10 +1,5 @@
 use std::{
-    borrow::Cow,
-    io,
-    marker::PhantomData,
-    mem::{self, MaybeUninit},
-    net::{IpAddr, SocketAddr},
-    time::Duration,
+    borrow::Cow, io, marker::PhantomData, mem::MaybeUninit, net::SocketAddr, time::Duration,
 };
 
 use crate::{
@@ -42,12 +37,7 @@ impl<V: IpVersion> RawBlockingPinger<V> {
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(err) => return Err(err),
         };
-        let source = match (source.ip(), V::IS_V4) {
-            (IpAddr::V4(v4), true) => unsafe { mem::transmute_copy(&v4) },
-            (IpAddr::V6(v6), false) => unsafe { mem::transmute_copy(&v6) },
-            _ => unreachable!(),
-        };
-
+        let source = V::from_ip_addr(source.ip()).unwrap();
         let packet = EchoReplyPacket::from_reply(source, Cow::Borrowed(received));
         Ok(packet)
     }
