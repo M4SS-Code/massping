@@ -302,7 +302,7 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
                 let now = Instant::now().encode();
                 let (now_part, random_part) = payload.split_at_mut(now.len());
                 now_part.copy_from_slice(&now);
-                getrandom::getrandom(random_part).expect("generate random payload");
+                getrandom::fill(random_part).expect("generate random payload");
             }
 
             let packet = EchoRequestPacket::new(
