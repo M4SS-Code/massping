@@ -46,7 +46,6 @@ pub use self::{
     pinger::{MeasureManyStream, Pinger, V4Pinger, V6Pinger},
 };
 
-#[cfg(not(feature = "strong"))]
 mod instant;
 mod ip_version;
 pub mod packet;

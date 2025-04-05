@@ -1,49 +1,78 @@
-use std::{mem, ops::Sub, time::Duration};
+use std::{
+    ops::Sub,
+    time::{Duration, Instant},
+};
 
-#[derive(Copy, Clone)]
-pub struct Instant {
-    spec: libc::timespec,
+#[derive(Debug, Clone)]
+pub struct ReferenceInstant {
+    #[cfg(not(feature = "strong"))]
+    instant: Instant,
 }
 
-impl Instant {
-    pub fn now() -> Self {
-        let mut spec = unsafe { mem::zeroed() };
-        unsafe {
-            libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut spec as *mut _);
+#[derive(Debug, Copy, Clone)]
+pub struct RelativeInstant {
+    #[cfg(feature = "strong")]
+    relative: Instant,
+    #[cfg(not(feature = "strong"))]
+    relative: Duration,
+}
+
+impl ReferenceInstant {
+    pub fn new() -> Self {
+        Self {
+            #[cfg(not(feature = "strong"))]
+            instant: Instant::now(),
         }
-        Self { spec }
     }
 
-    pub const ENCODED_LEN: usize = mem::size_of::<libc::timespec>();
+    pub fn now(&self) -> RelativeInstant {
+        RelativeInstant {
+            #[cfg(feature = "strong")]
+            relative: Instant::now(),
+            #[cfg(not(feature = "strong"))]
+            relative: self.instant.elapsed(),
+        }
+    }
+}
 
+impl RelativeInstant {
+    #[cfg(not(feature = "strong"))]
+    pub const ENCODED_LEN: usize = 12;
+
+    #[cfg(not(feature = "strong"))]
     pub fn encode(&self) -> [u8; Self::ENCODED_LEN] {
-        // SAFETY: transmuting between items of the same length is fine
-        unsafe { mem::transmute_copy(&self.spec) }
+        let mut buf = [0u8; Self::ENCODED_LEN];
+        let (secs, nanos) = buf.split_at_mut(8);
+        secs.copy_from_slice(&self.relative.as_secs().to_ne_bytes());
+        nanos.copy_from_slice(&self.relative.subsec_nanos().to_ne_bytes());
+
+        buf
     }
 
-    pub fn decode(bytes: &[u8; Self::ENCODED_LEN]) -> Option<Self> {
-        // SAFETY: transmuting between items of the same length is fine
-        let spec: libc::timespec = unsafe { mem::transmute_copy(bytes) };
+    #[cfg(not(feature = "strong"))]
+    pub fn decode(buf: &[u8; Self::ENCODED_LEN]) -> Option<Self> {
+        let (secs, nanos) = buf.split_at(8);
+        let secs = u64::from_ne_bytes(secs.try_into().unwrap());
+        let nanos = u32::from_ne_bytes(nanos.try_into().unwrap());
 
-        if spec.tv_sec >= 0 && spec.tv_nsec >= 0 {
-            Some(Self { spec })
-        } else {
-            None
-        }
-    }
-}
-
-impl From<Instant> for Duration {
-    fn from(instant: Instant) -> Self {
-        Duration::new(instant.spec.tv_sec as _, instant.spec.tv_nsec as _)
+        let relative = Duration::from_secs(secs).checked_add(Duration::from_nanos(nanos.into()))?;
+        Some(Self { relative })
     }
 }
 
-impl Sub<Instant> for Instant {
+impl Sub<RelativeInstant> for RelativeInstant {
     type Output = Duration;
 
-    fn sub(self, other: Instant) -> Self::Output {
-        Duration::from(self).saturating_sub(Duration::from(other))
+    fn sub(self, rhs: RelativeInstant) -> Self::Output {
+        #[cfg(feature = "strong")]
+        {
+            self.relative.saturating_duration_since(rhs.relative)
+        }
+
+        #[cfg(not(feature = "strong"))]
+        {
+            self.relative.saturating_sub(rhs.relative)
+        }
     }
 }
 
@@ -51,32 +80,35 @@ impl Sub<Instant> for Instant {
 mod tests {
     use std::time::Duration;
 
-    use super::Instant;
+    use super::ReferenceInstant;
+    #[cfg(not(feature = "strong"))]
+    use super::RelativeInstant;
 
     #[test]
     fn passing_time() {
-        let a = Instant::now();
-        let b = Instant::now();
+        let reference = ReferenceInstant::new();
+        let a = reference.now();
+        let b = reference.now();
 
         assert!(b - a <= Duration::from_millis(10));
     }
 
     #[test]
     fn wrong_order() {
-        let a = Instant::now();
-        let b = Instant::now();
+        let reference = ReferenceInstant::new();
+        let a = reference.now();
+        let b = reference.now();
 
         assert_eq!(a - b, Duration::ZERO);
     }
 
     #[test]
+    #[cfg(not(feature = "strong"))]
     fn encode_decode() {
-        let a1 = Instant::now();
-        let a1_duration = Duration::from(a1);
+        let reference = ReferenceInstant::new();
+        let a1 = reference.now();
+        let a2 = RelativeInstant::decode(&a1.encode()).unwrap();
 
-        let a2 = Instant::decode(a1.encode()).unwrap();
-        let a2_duration = Duration::from(a2);
-
-        assert_eq!(a1_duration, a2_duration);
+        assert_eq!(a1.relative, a2.relative);
     }
 }

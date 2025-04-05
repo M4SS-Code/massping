@@ -114,7 +114,6 @@ dependencies = [
  "futures-core",
  "futures-util",
  "getrandom",
- "libc",
  "pnet_packet",
  "socket2",
  "tokio",
