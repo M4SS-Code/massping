@@ -8,9 +8,9 @@
 //! ## Features
 //!
 //! * `strong`: implements strong checking for the RTT. Disabling this
-//!             feature makes the pinger a little bit faster, but opens
-//!             you up to some servers, like those running [pong][ping],
-//!             to faking the ping times.
+//!   feature makes the pinger a little bit faster, but opens you up to
+//!   some servers, like those running [pong][ping], to faking the ping
+//!   times.
 //! * `stream`: implements [`Stream`] for [`MeasureManyStream`].
 //!
 //! ## MSRV version policy
