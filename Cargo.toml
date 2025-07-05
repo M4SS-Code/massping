@@ -16,7 +16,7 @@ all-features = true
 
 [dependencies]
 pnet_packet = "0.35"
-socket2 = { version = "0.5.1", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 
 getrandom = "0.3.1"
 tokio = { version = "1.25", features = ["net", "sync", "rt"] }
