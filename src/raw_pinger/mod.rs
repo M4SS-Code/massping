@@ -8,14 +8,14 @@ use std::{
     mem::{self, MaybeUninit},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 pub use self::blocking::RawBlockingPinger;
 use crate::{
+    IpVersion,
     packet::{EchoReplyPacket, EchoRequestPacket},
     socket::Socket,
-    IpVersion,
 };
 
 pub type RawV4BlockingPinger = RawBlockingPinger<Ipv4Addr>;

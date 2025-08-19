@@ -5,10 +5,11 @@
 use std::{borrow::Cow, marker::PhantomData};
 
 use pnet_packet::{
+    Packet as _,
     icmp::{IcmpPacket, IcmpTypes},
     icmpv6::{Icmpv6Packet, Icmpv6Types},
     ipv4::Ipv4Packet,
-    util, Packet as _,
+    util,
 };
 
 use crate::IpVersion;

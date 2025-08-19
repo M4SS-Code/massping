@@ -5,8 +5,8 @@ use std::{
     mem::MaybeUninit,
     net::{Ipv4Addr, Ipv6Addr},
     sync::{
-        atomic::{AtomicU16, Ordering},
         Arc,
+        atomic::{AtomicU16, Ordering},
     },
     task::{Context, Poll},
     thread,
@@ -24,9 +24,9 @@ use tokio::{
 
 use crate::instant::{ReferenceInstant, RelativeInstant};
 use crate::{
+    IpVersion,
     packet::EchoRequestPacket,
     raw_pinger::{RawBlockingPinger, RawPinger},
-    IpVersion,
 };
 
 /// A pinger for IPv4 addresses

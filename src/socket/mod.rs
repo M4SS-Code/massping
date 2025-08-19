@@ -2,7 +2,7 @@ use std::{
     io,
     mem::MaybeUninit,
     net::SocketAddr,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 use tokio::io::unix::AsyncFd;

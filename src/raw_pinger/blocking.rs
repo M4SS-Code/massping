@@ -3,9 +3,9 @@ use std::{
 };
 
 use crate::{
+    IpVersion,
     packet::{EchoReplyPacket, EchoRequestPacket},
     socket::BaseSocket,
-    IpVersion,
 };
 
 /// Synchronous pinger
