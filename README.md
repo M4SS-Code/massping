@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/massping.svg)](https://crates.io/crates/massping)
 [![Documentation](https://docs.rs/massping/badge.svg)](https://docs.rs/massping)
 [![dependency status](https://deps.rs/crate/massping/0.3.6/status.svg)](https://deps.rs/crate/massping/0.3.6)
-[![Rustc Version 1.70.0+](https://img.shields.io/badge/rustc-1.70.0+-lightgray.svg)](https://blog.rust-lang.org/2023/06/01/Rust-1.70.0.html)
+[![Rustc Version 1.85.0+](https://img.shields.io/badge/rustc-1.85.0+-lightgray.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/)
 [![CI](https://github.com/M4SS-Code/massping/actions/workflows/ci.yml/badge.svg)](https://github.com/M4SS-Code/massping/actions/workflows/ci.yml)
 
 Asynchronous ICMP ping library using Linux RAW sockets and the

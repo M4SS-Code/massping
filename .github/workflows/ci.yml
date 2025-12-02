@@ -51,8 +51,8 @@ jobs:
             rust: beta
           - name: nightly
             rust: nightly
-          - name: MSRV 1.70
-            rust: '1.70'
+          - name: MSRV 1.85
+            rust: '1.85'
 
     steps:
       - uses: actions/checkout@v6
