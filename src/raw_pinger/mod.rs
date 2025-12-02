@@ -2,7 +2,6 @@
 
 use std::{
     borrow::Cow,
-    future::Future,
     io,
     marker::PhantomData,
     mem::{self, MaybeUninit},
