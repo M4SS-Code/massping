@@ -26,9 +26,7 @@ impl BaseSocket {
             Self::new_icmpv6()
         }?;
 
-        if !blocking {
-            socket.set_nonblocking(blocking)?;
-        }
+        socket.set_nonblocking(!blocking)?;
         if let Some(read_timeout) = read_timeout {
             socket.set_read_timeout(Some(read_timeout))?;
         }
