@@ -127,6 +127,7 @@ impl<V: IpVersion> Pinger<V> {
     where
         I: Iterator<Item = V>,
     {
+        let (size_hint, _) = addresses.size_hint();
         let send_queue = addresses.into_iter().peekable();
         let (sender, receiver) = mpsc::unbounded_channel();
 
@@ -146,7 +147,7 @@ impl<V: IpVersion> Pinger<V> {
         MeasureManyStream {
             pinger: self,
             send_queue,
-            in_flight: HashMap::new(),
+            in_flight: HashMap::with_capacity(size_hint),
             receiver,
             sequence_number,
         }
