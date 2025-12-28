@@ -179,12 +179,12 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
         }
 
         // Try to send ICMP echo requests
-        self.poll_next_icmp_replys(cx);
+        self.poll_next_icmp_replies(cx);
 
         Poll::Pending
     }
 
-    fn poll_next_icmp_replys(&mut self, cx: &mut Context<'_>) {
+    fn poll_next_icmp_replies(&mut self, cx: &mut Context<'_>) {
         while let Some(&addr) = self.send_queue.peek() {
             let mut payload = [0; 64];
             getrandom::fill(&mut payload).expect("generate random payload");
