@@ -1,14 +1,14 @@
 //! Synchronous and asynchronous raw pinger implementation
 
 use std::{
-    borrow::Cow,
     io,
     marker::PhantomData,
-    mem::{self, MaybeUninit},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     pin::Pin,
     task::{Context, Poll, ready},
 };
+
+use bytes::BytesMut;
 
 use crate::{
     IpVersion,
@@ -61,19 +61,19 @@ impl<V: IpVersion> RawPinger<V> {
     pub fn recv(&self) -> RecvFuture<'_, V> {
         RecvFuture {
             pinger: self,
-            buf: Vec::with_capacity(1600),
+            buf: BytesMut::new(),
         }
     }
 
     /// Receive an ICMP ECHO reply packet
     pub fn poll_recv(
         &self,
+        buf: &mut BytesMut,
         cx: &mut Context<'_>,
-        buf: &mut [MaybeUninit<u8>],
-    ) -> Poll<io::Result<EchoReplyPacket<'_, V>>> {
-        let (buf, source) = ready!(self.socket.poll_read(cx, buf))?;
+    ) -> Poll<io::Result<EchoReplyPacket<V>>> {
+        let (buf, source) = ready!(self.socket.poll_read(buf, cx))?;
         let source = V::from_ip_addr(source.ip()).unwrap();
-        match EchoReplyPacket::from_reply(source, Cow::Borrowed(buf)) {
+        match EchoReplyPacket::from_reply(source, buf) {
             Some(packet) => Poll::Ready(Ok(packet)),
             None => {
                 cx.waker().wake_by_ref();
@@ -101,28 +101,15 @@ impl<V: IpVersion> Future for SendFuture<'_, V> {
 /// [`Future`] obtained from [`RawPinger::recv`].
 pub struct RecvFuture<'a, V: IpVersion> {
     pinger: &'a RawPinger<V>,
-    buf: Vec<u8>,
+    buf: BytesMut,
 }
 
 impl<V: IpVersion> Future for RecvFuture<'_, V> {
-    type Output = io::Result<EchoReplyPacket<'static, V>>;
+    type Output = io::Result<EchoReplyPacket<V>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.as_mut();
-
-        let packet = ready!(this.pinger.poll_recv(cx, this.buf.spare_capacity_mut()))?;
-        let source = packet.source();
-        let filled_buf_len = packet.as_bytes().len();
-
-        // SAFETY: `poll_recv` guarantees that `filled_buf_len` have been filled
-        unsafe {
-            this.buf.set_len(filled_buf_len);
-        }
-
-        let buf = mem::replace(&mut this.buf, Vec::with_capacity(1600));
+        let packet = ready!(self.pinger.poll_recv(&mut self.buf, cx))?;
         // SAFETY: `RawPinger` already checked that the packet is valid
-        Poll::Ready(Ok(unsafe {
-            EchoReplyPacket::from_reply_unchecked(source, Cow::Owned(buf))
-        }))
+        Poll::Ready(Ok(packet))
     }
 }

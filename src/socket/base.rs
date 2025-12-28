@@ -3,7 +3,6 @@ use std::{
     mem::MaybeUninit,
     net::SocketAddr,
     os::unix::io::{AsRawFd, RawFd},
-    slice,
 };
 
 use socket2::{Domain, Protocol, SockAddr, Type};
@@ -33,10 +32,10 @@ impl BaseSocket {
         socket2::Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::ICMPV6))
     }
 
-    pub(crate) fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<(&'_ [u8], SocketAddr)> {
+    pub(crate) fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<(usize, SocketAddr)> {
         self.socket.recv_from(buf).map(|(filled, source)| {
             (
-                unsafe { slice::from_raw_parts(buf.as_ptr().cast::<u8>(), filled) },
+                filled,
                 source.as_socket().expect("SockAddr is an IP socket"),
             )
         })
