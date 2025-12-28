@@ -2,14 +2,12 @@ use std::{
     collections::HashMap,
     io,
     iter::Peekable,
-    mem::MaybeUninit,
     net::{Ipv4Addr, Ipv6Addr},
     sync::{
         Arc,
         atomic::{AtomicU16, Ordering},
     },
     task::{Context, Poll},
-    thread,
     time::Duration,
 };
 #[cfg(feature = "stream")]
@@ -19,15 +17,10 @@ use std::{pin::Pin, task::ready};
 use futures_core::Stream;
 use tokio::{
     sync::mpsc::{self, error::TryRecvError},
-    task,
     time::Instant,
 };
 
-use crate::{
-    IpVersion,
-    packet::EchoRequestPacket,
-    raw_pinger::{RawBlockingPinger, RawPinger},
-};
+use crate::{IpVersion, packet::EchoRequestPacket, raw_pinger::RawPinger};
 
 /// A pinger for IPv4 addresses
 pub type V4Pinger = Pinger<Ipv4Addr>;
@@ -65,7 +58,6 @@ impl<V: IpVersion> Pinger<V> {
     /// you are not going to be sending pings for a long period of time.
     pub fn new() -> io::Result<Self> {
         let raw = RawPinger::new()?;
-        let raw_blocking = RawBlockingPinger::new()?;
 
         let mut identifier = [0; 2];
         getrandom::fill(&mut identifier).expect("run getrandom");
@@ -79,92 +71,44 @@ impl<V: IpVersion> Pinger<V> {
             identifier,
             sequence_number: AtomicU16::new(0),
         });
-        task::spawn_blocking(move || {
-            let mut buf = [MaybeUninit::<u8>::uninit(); 1600];
 
+        // Spawn async receive task using the same socket
+        let inner_recv = Arc::clone(&inner);
+        tokio::spawn(async move {
             let mut subscribers: HashMap<u16, mpsc::UnboundedSender<(V, Instant)>> = HashMap::new();
-            'packets: loop {
-                let maybe_packet = match raw_blocking.recv(&mut buf) {
-                    Ok(maybe_packet) => maybe_packet,
-                    Err(_err) => {
-                        thread::yield_now();
-                        continue 'packets;
+
+            loop {
+                // Process any pending subscription changes
+                loop {
+                    match receiver.try_recv() {
+                        Ok(RoundMessage::Subscribe {
+                            sequence_number,
+                            sender,
+                        }) => {
+                            subscribers.insert(sequence_number, sender);
+                        }
+                        Ok(RoundMessage::Unsubscribe { sequence_number }) => {
+                            drop(subscribers.remove(&sequence_number));
+                        }
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => return,
                     }
+                }
+
+                // Receive next packet (with DGRAM sockets, kernel handles routing)
+                let packet = match inner_recv.raw.recv().await {
+                    Ok(packet) => packet,
+                    Err(_) => continue,
                 };
 
-                match &maybe_packet {
-                    Some(packet) if packet.identifier() == identifier => {
-                        let recv_instant = Instant::now();
+                let recv_instant = Instant::now();
 
-                        let packet_source = packet.source();
-                        let packet_sequence_number = packet.sequence_number();
-                        match subscribers.get(&packet_sequence_number) {
-                            Some(subscriber) => {
-                                if subscriber.send((packet_source, recv_instant)).is_err() {
-                                    // Closed
-                                    subscribers.remove(&packet_sequence_number);
-                                }
+                let packet_source = packet.source();
+                let packet_sequence_number = packet.sequence_number();
 
-                                continue 'packets;
-                            }
-                            None => {
-                                // TODO: fix this duplication
-                                'registrations: loop {
-                                    match receiver.try_recv() {
-                                        Ok(RoundMessage::Subscribe {
-                                            sequence_number,
-                                            sender,
-                                        }) => {
-                                            if packet_sequence_number == sequence_number {
-                                                // Packet matches
-
-                                                if sender
-                                                    .send((packet_source, recv_instant))
-                                                    .is_err()
-                                                {
-                                                    // Closed
-                                                    continue 'registrations;
-                                                }
-                                            }
-
-                                            subscribers.insert(sequence_number, sender);
-                                        }
-                                        Ok(RoundMessage::Unsubscribe { sequence_number }) => {
-                                            drop(subscribers.remove(&sequence_number));
-                                        }
-                                        Err(TryRecvError::Empty) => {
-                                            break 'registrations;
-                                        }
-                                        Err(TryRecvError::Disconnected) => {
-                                            break 'packets;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Some(_packet) => {}
-                    None => {
-                        // TODO: fix this duplication
-                        'registrations: loop {
-                            match receiver.try_recv() {
-                                Ok(RoundMessage::Subscribe {
-                                    sequence_number,
-                                    sender,
-                                }) => {
-                                    subscribers.insert(sequence_number, sender);
-                                }
-                                Ok(RoundMessage::Unsubscribe { sequence_number }) => {
-                                    drop(subscribers.remove(&sequence_number));
-                                }
-                                Err(TryRecvError::Empty) => {
-                                    break 'registrations;
-                                }
-                                Err(TryRecvError::Disconnected) => {
-                                    break 'packets;
-                                }
-                            }
-                        }
+                if let Some(subscriber) = subscribers.get(&packet_sequence_number) {
+                    if subscriber.send((packet_source, recv_instant)).is_err() {
+                        subscribers.remove(&packet_sequence_number);
                     }
                 }
             }

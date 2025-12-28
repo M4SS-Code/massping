@@ -4,7 +4,6 @@ use std::{
     net::SocketAddr,
     os::unix::io::{AsRawFd, RawFd},
     slice,
-    time::Duration,
 };
 
 use socket2::{Domain, Protocol, SockAddr, Type};
@@ -16,20 +15,13 @@ pub(crate) struct BaseSocket {
 }
 
 impl BaseSocket {
-    pub(crate) fn new_icmp<V: IpVersion>(
-        blocking: bool,
-        read_timeout: Option<Duration>,
-    ) -> io::Result<Self> {
+    pub(crate) fn new_icmp<V: IpVersion>() -> io::Result<Self> {
         let socket = if V::IS_V4 {
             Self::new_icmpv4()
         } else {
             Self::new_icmpv6()
         }?;
 
-        socket.set_nonblocking(!blocking)?;
-        if let Some(read_timeout) = read_timeout {
-            socket.set_read_timeout(Some(read_timeout))?;
-        }
         Ok(Self { socket })
     }
 

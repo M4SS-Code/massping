@@ -18,7 +18,7 @@ pub(crate) struct Socket {
 
 impl Socket {
     pub(crate) fn new_icmp<V: IpVersion>() -> io::Result<Self> {
-        let base = BaseSocket::new_icmp::<V>(false, None)?;
+        let base = BaseSocket::new_icmp::<V>()?;
 
         let fd = AsyncFd::new(base)?;
         Ok(Self { fd })

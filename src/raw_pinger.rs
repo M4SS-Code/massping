@@ -10,19 +10,14 @@ use std::{
     task::{Context, Poll, ready},
 };
 
-pub use self::blocking::RawBlockingPinger;
 use crate::{
     IpVersion,
     packet::{EchoReplyPacket, EchoRequestPacket},
     socket::Socket,
 };
 
-pub type RawV4BlockingPinger = RawBlockingPinger<Ipv4Addr>;
-pub type RawV6BlockingPinger = RawBlockingPinger<Ipv6Addr>;
 pub type RawV4Pinger = RawPinger<Ipv4Addr>;
 pub type RawV6Pinger = RawPinger<Ipv6Addr>;
-
-mod blocking;
 
 /// Asynchronous pinger
 pub struct RawPinger<V: IpVersion> {
