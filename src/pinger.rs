@@ -20,9 +20,9 @@ use futures_core::Stream;
 use tokio::{
     sync::mpsc::{self, error::TryRecvError},
     task,
+    time::Instant,
 };
 
-use crate::instant::{ReferenceInstant, RelativeInstant};
 use crate::{
     IpVersion,
     packet::EchoRequestPacket,
@@ -41,7 +41,6 @@ pub struct Pinger<V: IpVersion> {
 
 struct InnerPinger<V: IpVersion> {
     raw: RawPinger<V>,
-    reference: ReferenceInstant,
     round_sender: mpsc::UnboundedSender<RoundMessage<V>>,
     identifier: u16,
     sequence_number: AtomicU16,
@@ -50,10 +49,7 @@ struct InnerPinger<V: IpVersion> {
 enum RoundMessage<V: IpVersion> {
     Subscribe {
         sequence_number: u16,
-        #[cfg(feature = "strong")]
-        sender: mpsc::UnboundedSender<(V, RelativeInstant)>,
-        #[cfg(not(feature = "strong"))]
-        sender: mpsc::UnboundedSender<(V, RelativeInstant, RelativeInstant)>,
+        sender: mpsc::UnboundedSender<(V, Instant)>,
     },
     Unsubscribe {
         sequence_number: u16,
@@ -68,7 +64,6 @@ impl<V: IpVersion> Pinger<V> {
     /// be beneficial to `Drop` the `Pinger` and recreate it if
     /// you are not going to be sending pings for a long period of time.
     pub fn new() -> io::Result<Self> {
-        let reference = ReferenceInstant::new();
         let raw = RawPinger::new()?;
         let raw_blocking = RawBlockingPinger::new()?;
 
@@ -80,7 +75,6 @@ impl<V: IpVersion> Pinger<V> {
 
         let inner = Arc::new(InnerPinger {
             raw,
-            reference: reference.clone(),
             round_sender: sender,
             identifier,
             sequence_number: AtomicU16::new(0),
@@ -88,16 +82,7 @@ impl<V: IpVersion> Pinger<V> {
         task::spawn_blocking(move || {
             let mut buf = [MaybeUninit::<u8>::uninit(); 1600];
 
-            #[cfg(feature = "strong")]
-            let mut subscribers: HashMap<
-                u16,
-                mpsc::UnboundedSender<(V, RelativeInstant)>,
-            > = HashMap::new();
-            #[cfg(not(feature = "strong"))]
-            let mut subscribers: HashMap<
-                u16,
-                mpsc::UnboundedSender<(V, RelativeInstant, RelativeInstant)>,
-            > = HashMap::new();
+            let mut subscribers: HashMap<u16, mpsc::UnboundedSender<(V, Instant)>> = HashMap::new();
             'packets: loop {
                 let maybe_packet = match raw_blocking.recv(&mut buf) {
                     Ok(maybe_packet) => maybe_packet,
@@ -109,34 +94,13 @@ impl<V: IpVersion> Pinger<V> {
 
                 match &maybe_packet {
                     Some(packet) if packet.identifier() == identifier => {
-                        let recv_instant = reference.now();
-
-                        #[cfg(not(feature = "strong"))]
-                        let send_instant = {
-                            let payload = packet.payload();
-                            match RelativeInstant::decode(
-                                payload[..RelativeInstant::ENCODED_LEN].try_into().unwrap(),
-                            ) {
-                                Some(send_instant) => send_instant,
-                                None => continue 'packets,
-                            }
-                        };
+                        let recv_instant = Instant::now();
 
                         let packet_source = packet.source();
                         let packet_sequence_number = packet.sequence_number();
                         match subscribers.get(&packet_sequence_number) {
                             Some(subscriber) => {
-                                #[cfg(feature = "strong")]
                                 if subscriber.send((packet_source, recv_instant)).is_err() {
-                                    // Closed
-                                    subscribers.remove(&packet_sequence_number);
-                                }
-
-                                #[cfg(not(feature = "strong"))]
-                                if subscriber
-                                    .send((packet_source, send_instant, recv_instant))
-                                    .is_err()
-                                {
                                     // Closed
                                     subscribers.remove(&packet_sequence_number);
                                 }
@@ -154,22 +118,8 @@ impl<V: IpVersion> Pinger<V> {
                                             if packet_sequence_number == sequence_number {
                                                 // Packet matches
 
-                                                #[cfg(feature = "strong")]
                                                 if sender
                                                     .send((packet_source, recv_instant))
-                                                    .is_err()
-                                                {
-                                                    // Closed
-                                                    continue 'registrations;
-                                                }
-
-                                                #[cfg(not(feature = "strong"))]
-                                                if sender
-                                                    .send((
-                                                        packet_source,
-                                                        send_instant,
-                                                        recv_instant,
-                                                    ))
                                                     .is_err()
                                                 {
                                                     // Closed
@@ -252,7 +202,6 @@ impl<V: IpVersion> Pinger<V> {
         MeasureManyStream {
             pinger: self,
             send_queue,
-            #[cfg(feature = "strong")]
             in_flight: HashMap::new(),
             receiver,
             sequence_number,
@@ -273,12 +222,8 @@ impl<V: IpVersion> Pinger<V> {
 pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
     pinger: &'a Pinger<V>,
     send_queue: Peekable<I>,
-    #[cfg(feature = "strong")]
-    in_flight: HashMap<V, RelativeInstant>,
-    #[cfg(feature = "strong")]
-    receiver: mpsc::UnboundedReceiver<(V, RelativeInstant)>,
-    #[cfg(not(feature = "strong"))]
-    receiver: mpsc::UnboundedReceiver<(V, RelativeInstant, RelativeInstant)>,
+    in_flight: HashMap<V, Instant>,
+    receiver: mpsc::UnboundedReceiver<(V, Instant)>,
     sequence_number: u16,
 }
 
@@ -298,15 +243,7 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
     fn poll_next_icmp_replys(&mut self, cx: &mut Context<'_>) {
         while let Some(&addr) = self.send_queue.peek() {
             let mut payload = [0; 64];
-            #[cfg(feature = "strong")]
             getrandom::fill(&mut payload).expect("generate random payload");
-            #[cfg(not(feature = "strong"))]
-            {
-                let now = self.pinger.inner.reference.now().encode();
-                let (now_part, random_part) = payload.split_at_mut(now.len());
-                now_part.copy_from_slice(&now);
-                getrandom::fill(random_part).expect("generate random payload");
-            }
 
             let packet = EchoRequestPacket::new(
                 self.pinger.inner.identifier,
@@ -315,13 +252,11 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
             );
             match self.pinger.inner.raw.poll_send_to(cx, addr, &packet) {
                 Poll::Ready(_) => {
-                    #[cfg(feature = "strong")]
-                    let sent_at = self.pinger.inner.reference.now();
+                    let sent_at = Instant::now();
 
                     let taken_addr = self.send_queue.next();
                     debug_assert!(taken_addr.is_some());
 
-                    #[cfg(feature = "strong")]
                     self.in_flight.insert(addr, sent_at);
                 }
                 Poll::Pending => break,
@@ -329,7 +264,6 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
         }
     }
 
-    #[cfg_attr(not(feature = "strong"), allow(clippy::never_loop))]
     fn poll_next_from_different_round(
         &mut self,
         cx: &mut Context<'_>,
@@ -337,17 +271,11 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
         loop {
             match self.receiver.poll_recv(cx) {
                 Poll::Pending => return Poll::Pending,
-                #[cfg(feature = "strong")]
                 Poll::Ready(Some((addr, recv_instant))) => {
                     if let Some(send_instant) = self.in_flight.remove(&addr) {
                         let rtt = recv_instant - send_instant;
                         return Poll::Ready(Some((addr, rtt)));
                     }
-                }
-                #[cfg(not(feature = "strong"))]
-                Poll::Ready(Some((addr, send_instant, recv_instant))) => {
-                    let rtt = recv_instant - send_instant;
-                    return Poll::Ready(Some((addr, rtt)));
                 }
                 Poll::Ready(None) => return Poll::Ready(None),
             }

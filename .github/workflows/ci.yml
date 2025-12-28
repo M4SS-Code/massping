@@ -57,6 +57,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - run: sudo $HOME/.cargo/bin/rustup default ${{ matrix.rust }}
+      - uses: dtolnay/rust-toolchain@stable
 
-      - run: sudo env "PATH=$PATH" CI=1 $HOME/.cargo/bin/cargo test
+      - run: cargo test
