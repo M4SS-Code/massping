@@ -59,9 +59,7 @@ impl<V: IpVersion> Pinger<V> {
     pub fn new() -> io::Result<Self> {
         let raw = RawPinger::new()?;
 
-        let mut identifier = [0; 2];
-        getrandom::fill(&mut identifier).expect("run getrandom");
-        let identifier = u16::from_ne_bytes(identifier);
+        let identifier = rand::random::<u16>();
 
         let (sender, mut receiver) = mpsc::unbounded_channel();
 
@@ -187,8 +185,7 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
 
     fn poll_next_icmp_replies(&mut self, cx: &mut Context<'_>) {
         while let Some(&addr) = self.send_queue.peek() {
-            let mut payload = [0; 64];
-            getrandom::fill(&mut payload).expect("generate random payload");
+            let payload = rand::random::<[u8; 64]>();
 
             let packet = EchoRequestPacket::new(
                 self.pinger.inner.identifier,
