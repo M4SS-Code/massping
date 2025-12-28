@@ -1,9 +1,8 @@
-//! Asynchronous ICMP ping library using Linux RAW sockets and the
+//! Asynchronous ICMP ping library using Linux DGRAM sockets and the
 //! tokio runtime.
 //!
-//! As this crate needs to use RAW sockets, it must either be run as root
-//! or permission must explicitly be set via
-//! `sudo setcap cap_net_raw=+eip path/to/binary`.
+//! This crate uses `SOCK_DGRAM` sockets with `IPPROTO_ICMP`/`IPPROTO_ICMPV6`,
+//! which allows sending ICMP echo requests without root privileges on Linux.
 //!
 //! ## Features
 //!

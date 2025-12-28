@@ -9,10 +9,6 @@
 Asynchronous ICMP ping library using Linux RAW sockets and the
 tokio runtime.
 
-As this crate needs to use RAW sockets, it must either be run as root
-or permission must explicitly be set via
-`sudo setcap cap_net_raw=+eip path/to/binary`.
-
 ## Features
 
 * `stream`: implements `Stream` for `MeasureManyStream`.

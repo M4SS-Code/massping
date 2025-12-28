@@ -26,11 +26,11 @@ impl BaseSocket {
     }
 
     fn new_icmpv4() -> io::Result<socket2::Socket> {
-        socket2::Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4))
+        socket2::Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::ICMPV4))
     }
 
     fn new_icmpv6() -> io::Result<socket2::Socket> {
-        socket2::Socket::new(Domain::IPV6, Type::RAW, Some(Protocol::ICMPV6))
+        socket2::Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::ICMPV6))
     }
 
     pub(crate) fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<(&'_ [u8], SocketAddr)> {

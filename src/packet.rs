@@ -8,7 +8,6 @@ use pnet_packet::{
     Packet as _,
     icmp::{IcmpPacket, IcmpTypes},
     icmpv6::{Icmpv6Packet, Icmpv6Types},
-    ipv4::Ipv4Packet,
     util,
 };
 
@@ -78,15 +77,13 @@ impl<V: IpVersion> EchoRequestPacket<V> {
 }
 
 impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
-    /// Parse an IP packet containing an ICMP echo reply packet
+    /// Parse an ICMP echo reply packet
     pub(crate) fn from_reply(source: V, buf: Cow<'a, [u8]>) -> Option<Self> {
         if V::IS_V4 {
-            if let Some(ip_packet) = Ipv4Packet::new(&buf) {
-                if let Some(icmp_packet) = IcmpPacket::new(ip_packet.payload()) {
-                    if icmp_packet.get_icmp_type() == IcmpTypes::EchoReply {
-                        // SAFETY: we just checked that the packet is valid
-                        return Some(unsafe { Self::from_reply_unchecked(source, buf) });
-                    }
+            if let Some(icmp_packet) = IcmpPacket::new(&buf) {
+                if icmp_packet.get_icmp_type() == IcmpTypes::EchoReply {
+                    // SAFETY: we just checked that the packet is valid
+                    return Some(unsafe { Self::from_reply_unchecked(source, buf) });
                 }
             }
         } else if let Some(icmp_packet) = Icmpv6Packet::new(&buf) {
@@ -118,9 +115,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
             use pnet_packet::icmp::echo_reply::EchoReplyPacket;
 
             // SAFETY: the check has already been done by the builder
-            let packet = unsafe { Ipv4Packet::new(&self.buf).unwrap_unchecked() };
-            // SAFETY: the check has already been done by the builder
-            let packet = unsafe { EchoReplyPacket::new(packet.payload()).unwrap_unchecked() };
+            let packet = unsafe { EchoReplyPacket::new(&self.buf).unwrap_unchecked() };
             packet.get_identifier()
         } else {
             use pnet_packet::icmpv6::echo_reply::EchoReplyPacket;
@@ -137,9 +132,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
             use pnet_packet::icmp::echo_reply::EchoReplyPacket;
 
             // SAFETY: the check has already been done by the builder
-            let packet = unsafe { Ipv4Packet::new(&self.buf).unwrap_unchecked() };
-            // SAFETY: the check has already been done by the builder
-            let packet = unsafe { EchoReplyPacket::new(packet.payload()).unwrap_unchecked() };
+            let packet = unsafe { EchoReplyPacket::new(&self.buf).unwrap_unchecked() };
             packet.get_sequence_number()
         } else {
             use pnet_packet::icmpv6::echo_reply::EchoReplyPacket;
@@ -156,9 +149,7 @@ impl<'a, V: IpVersion> EchoReplyPacket<'a, V> {
             use pnet_packet::icmp::echo_reply::EchoReplyPacket;
 
             // SAFETY: the check has already been done by the builder
-            let packet = unsafe { Ipv4Packet::new(&self.buf).unwrap_unchecked() };
-            // SAFETY: the check has already been done by the builder
-            let packet = unsafe { EchoReplyPacket::new(packet.payload()).unwrap_unchecked() };
+            let packet = unsafe { EchoReplyPacket::new(&self.buf).unwrap_unchecked() };
             packet.payload().len()
         } else {
             use pnet_packet::icmpv6::echo_reply::EchoReplyPacket;
