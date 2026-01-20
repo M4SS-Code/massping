@@ -21,6 +21,9 @@ impl BaseSocket {
             Self::new_icmpv6()
         }?;
 
+        // Required for use with tokio's AsyncFd
+        socket.set_nonblocking(true)?;
+
         Ok(Self { socket })
     }
 
