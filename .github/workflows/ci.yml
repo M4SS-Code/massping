@@ -57,7 +57,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
 
       - name: Allow ICMP ping sockets for unprivileged users
         run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
