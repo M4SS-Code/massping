@@ -134,3 +134,50 @@ impl<V: IpVersion> EchoReplyPacket<V> {
         &self.payload
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use bytes::Bytes;
+
+    use super::EchoReplyPacket;
+
+    #[test]
+    fn from_reply_rejects_truncated_packet() {
+        // Too short to be a valid ICMP packet (needs at least 8 bytes)
+        let buf = Bytes::from_static(&[0x00, 0x00]);
+        let result = EchoReplyPacket::<Ipv4Addr>::from_reply(Ipv4Addr::LOCALHOST, buf);
+        assert!(result.is_none(), "Should reject truncated packet");
+    }
+
+    #[test]
+    fn from_reply_rejects_wrong_icmp_type() {
+        // ICMP Echo Request (type 8) instead of Echo Reply (type 0)
+        // Format: type(1), code(1), checksum(2), identifier(2), sequence(2)
+        let buf = Bytes::from_static(&[0x08, 0x00, 0x00, 0x00, 0x12, 0x34, 0x00, 0x01]);
+        let result = EchoReplyPacket::<Ipv4Addr>::from_reply(Ipv4Addr::LOCALHOST, buf);
+        assert!(result.is_none(), "Should reject Echo Request (type 8)");
+    }
+
+    #[test]
+    fn from_reply_rejects_destination_unreachable() {
+        // ICMP Destination Unreachable (type 3)
+        let buf = Bytes::from_static(&[0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        let result = EchoReplyPacket::<Ipv4Addr>::from_reply(Ipv4Addr::LOCALHOST, buf);
+        assert!(result.is_none(), "Should reject Destination Unreachable");
+    }
+
+    #[test]
+    fn from_reply_accepts_valid_echo_reply() {
+        // Valid ICMP Echo Reply (type 0)
+        // Format: type(1), code(1), checksum(2), identifier(2), sequence(2), payload...
+        let buf = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, 0x12, 0x34, 0x00, 0x01, b't', b'e', b's', b't',
+        ]);
+        let packet = EchoReplyPacket::<Ipv4Addr>::from_reply(Ipv4Addr::LOCALHOST, buf).unwrap();
+        assert_eq!(packet.identifier(), 0x1234);
+        assert_eq!(packet.sequence_number(), 0x0001);
+        assert_eq!(packet.payload(), b"test");
+    }
+}
