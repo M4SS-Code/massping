@@ -59,4 +59,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Allow ICMP ping sockets for unprivileged users
+        run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+
       - run: cargo test
