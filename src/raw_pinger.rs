@@ -113,3 +113,76 @@ impl<V: IpVersion> Future for RecvFuture<'_, V> {
         Poll::Ready(Ok(packet))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{future::poll_fn, net::Ipv4Addr, time::Duration};
+
+    use bytes::BytesMut;
+    use tokio::time::timeout;
+
+    use super::RawPinger;
+    use crate::packet::EchoRequestPacket;
+
+    /// Test that verifies `poll_recv` doesn't accumulate data in the buffer
+    /// across multiple calls.
+    ///
+    /// We test this by using `poll_recv` directly with a shared buffer across
+    /// multiple ping/recv cycles and verifying the buffer state.
+    #[tokio::test]
+    async fn poll_recv_clears_buffer_between_calls() {
+        let pinger: RawPinger<Ipv4Addr> = RawPinger::new().unwrap();
+        let mut recv_buf = BytesMut::new();
+
+        for i in 0..3u16 {
+            let packet = EchoRequestPacket::new(0x1234, i, b"test payload here");
+            pinger.send_to(Ipv4Addr::LOCALHOST, &packet).await.unwrap();
+
+            // Use poll_recv directly so we can inspect the buffer
+            let result = timeout(
+                Duration::from_secs(5),
+                poll_fn(|cx| pinger.poll_recv(&mut recv_buf, cx)),
+            )
+            .await;
+
+            match result {
+                Ok(Ok(reply)) => {
+                    assert_eq!(reply.source(), Ipv4Addr::LOCALHOST);
+                    assert_eq!(reply.sequence_number(), i);
+
+                    // buffer should be empty after successful recv
+                    // because poll_read calls buf.split().freeze()
+                    assert!(
+                        recv_buf.is_empty(),
+                        "Buffer should be empty, but has {} bytes on iteration {i}",
+                        recv_buf.len()
+                    );
+                }
+                Ok(Err(e)) => panic!("recv {i} failed with error: {e}"),
+                Err(_) => panic!("timeout on recv {i}"),
+            }
+        }
+    }
+
+    /// Test that multiple sequential receives work correctly.
+    #[tokio::test]
+    async fn multiple_sequential_receives() {
+        let pinger: RawPinger<Ipv4Addr> = RawPinger::new().unwrap();
+
+        for i in 0..3u16 {
+            let packet = EchoRequestPacket::new(0x1234, i, b"test");
+            pinger.send_to(Ipv4Addr::LOCALHOST, &packet).await.unwrap();
+
+            let result = timeout(Duration::from_secs(5), pinger.recv()).await;
+
+            match result {
+                Ok(Ok(reply)) => {
+                    assert_eq!(reply.source(), Ipv4Addr::LOCALHOST);
+                    assert_eq!(reply.sequence_number(), i);
+                }
+                Ok(Err(e)) => panic!("recv {i} failed with error: {e}"),
+                Err(_) => panic!("timeout on recv {i}"),
+            }
+        }
+    }
+}
