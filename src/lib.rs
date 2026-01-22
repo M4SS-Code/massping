@@ -23,6 +23,8 @@
     rustdoc::broken_intra_doc_links
 )]
 
+#[cfg(feature = "stream")]
+use std::pin::Pin;
 use std::{
     io,
     marker::PhantomData,
@@ -30,8 +32,6 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-#[cfg(feature = "stream")]
-use std::{pin::Pin, task::ready};
 
 #[cfg(feature = "stream")]
 use futures_core::Stream;
@@ -88,6 +88,8 @@ impl DualstackPinger {
         DualstackMeasureManyStream {
             v4: self.v4.measure_many(addresses_v4),
             v6: self.v6.measure_many(addresses_v6),
+            v4_done: false,
+            v6_done: false,
         }
     }
 }
@@ -105,16 +107,30 @@ impl DualstackPinger {
 pub struct DualstackMeasureManyStream<'a, I: Iterator<Item = IpAddr>> {
     v4: MeasureManyStream<'a, Ipv4Addr, FilterIpAddr<I, Ipv4Addr>>,
     v6: MeasureManyStream<'a, Ipv6Addr, FilterIpAddr<I, Ipv6Addr>>,
+    v4_done: bool,
+    v6_done: bool,
 }
 
 impl<I: Iterator<Item = IpAddr>> DualstackMeasureManyStream<'_, I> {
-    pub fn poll_next_unpin(&mut self, cx: &mut Context<'_>) -> Poll<(IpAddr, Duration)> {
-        if let Poll::Ready((v4, rtt)) = self.v4.poll_next_unpin(cx) {
-            return Poll::Ready((IpAddr::V4(v4), rtt));
+    pub fn poll_next_unpin(&mut self, cx: &mut Context<'_>) -> Poll<Option<(IpAddr, Duration)>> {
+        if !self.v4_done {
+            match self.v4.poll_next_unpin(cx) {
+                Poll::Ready(Some((v4, rtt))) => return Poll::Ready(Some((IpAddr::V4(v4), rtt))),
+                Poll::Ready(None) => self.v4_done = true,
+                Poll::Pending => {}
+            }
         }
 
-        if let Poll::Ready((v6, rtt)) = self.v6.poll_next_unpin(cx) {
-            return Poll::Ready((IpAddr::V6(v6), rtt));
+        if !self.v6_done {
+            match self.v6.poll_next_unpin(cx) {
+                Poll::Ready(Some((v6, rtt))) => return Poll::Ready(Some((IpAddr::V6(v6), rtt))),
+                Poll::Ready(None) => self.v6_done = true,
+                Poll::Pending => {}
+            }
+        }
+
+        if self.v4_done && self.v6_done {
+            return Poll::Ready(None);
         }
 
         Poll::Pending
@@ -126,8 +142,7 @@ impl<I: Iterator<Item = IpAddr> + Unpin> Stream for DualstackMeasureManyStream<'
     type Item = (IpAddr, Duration);
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let result = ready!(self.as_mut().poll_next_unpin(cx));
-        Poll::Ready(Some(result))
+        self.as_mut().poll_next_unpin(cx)
     }
 }
 
