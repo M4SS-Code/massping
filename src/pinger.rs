@@ -1,3 +1,5 @@
+#[cfg(feature = "stream")]
+use std::pin::Pin;
 use std::{
     collections::HashMap,
     future::poll_fn,
@@ -11,8 +13,6 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-#[cfg(feature = "stream")]
-use std::{pin::Pin, task::ready};
 
 use bytes::BytesMut;
 #[cfg(feature = "stream")]
@@ -210,14 +210,19 @@ pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
 }
 
 impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
-    pub fn poll_next_unpin(&mut self, cx: &mut Context<'_>) -> Poll<(V, Duration)> {
-        // Try to see if another `MeasureManyStream` got it
-        if let Poll::Ready(Some((addr, rtt))) = self.poll_next_from_different_round(cx) {
-            return Poll::Ready((addr, rtt));
+    pub fn poll_next_unpin(&mut self, cx: &mut Context<'_>) -> Poll<Option<(V, Duration)>> {
+        // Try to receive a response (may be from a different round)
+        if let Poll::Ready(maybe_reply) = self.poll_next_from_different_round(cx) {
+            return Poll::Ready(maybe_reply);
         }
 
         // Try to send ICMP echo requests
         self.poll_next_icmp_replies(cx);
+
+        // Check if we're done: no more addresses to send AND no responses pending
+        if self.send_queue.peek().is_none() && self.in_flight.is_empty() {
+            return Poll::Ready(None);
+        }
 
         Poll::Pending
     }
@@ -269,8 +274,7 @@ impl<V: IpVersion, I: Iterator<Item = V> + Unpin> Stream for MeasureManyStream<'
     type Item = (V, Duration);
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let result = ready!(self.as_mut().poll_next_unpin(cx));
-        Poll::Ready(Some(result))
+        self.as_mut().poll_next_unpin(cx)
     }
 }
 
