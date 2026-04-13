@@ -5,14 +5,22 @@
 use std::marker::PhantomData;
 
 use bytes::{Bytes, BytesMut};
-use pnet_packet::{
-    Packet as _,
-    icmp::{IcmpPacket, IcmpTypes},
-    icmpv6::{Icmpv6Packet, Icmpv6Types},
-    util,
-};
 
 use crate::IpVersion;
+
+// ICMP header layout (8 bytes):
+// Offset 0: Type (u8)
+// Offset 1: Code (u8)
+// Offset 2-3: Checksum (u16 big-endian)
+// Offset 4-5: Identifier (u16 big-endian)
+// Offset 6-7: Sequence Number (u16 big-endian)
+// Offset 8+: Payload
+const ICMP_HEADER_LEN: usize = 8;
+
+const ICMPV4_TYPE_ECHO_REQUEST: u8 = 8;
+const ICMPV4_TYPE_ECHO_REPLY: u8 = 0;
+const ICMPV6_TYPE_ECHO_REQUEST: u8 = 128;
+const ICMPV6_TYPE_ECHO_REPLY: u8 = 129;
 
 /// An ICMP echo request packet
 pub struct EchoRequestPacket<V: IpVersion> {
@@ -31,44 +39,26 @@ pub struct EchoReplyPacket<V: IpVersion> {
 impl<V: IpVersion> EchoRequestPacket<V> {
     /// Build a new ICMP echo request packet
     pub fn new(identifier: u16, sequence_number: u16, payload: &[u8]) -> Self {
-        if V::IS_V4 {
-            use pnet_packet::icmp::echo_request::MutableEchoRequestPacket;
+        let mut buf = BytesMut::zeroed(ICMP_HEADER_LEN + payload.len());
 
-            let mut buf = BytesMut::zeroed(8 + payload.len());
-
-            let mut packet = MutableEchoRequestPacket::new(&mut buf).unwrap();
-            packet.set_icmp_type(IcmpTypes::EchoRequest);
-            packet.set_identifier(identifier);
-            packet.set_sequence_number(sequence_number);
-            packet.set_payload(payload);
-            packet.set_checksum(util::checksum(packet.packet(), 1));
-
-            let packet_len = packet.packet().len();
-            debug_assert_eq!(buf.len(), packet_len);
-
-            Self::from_buf(buf.freeze())
+        let echo_type = if V::IS_V4 {
+            ICMPV4_TYPE_ECHO_REQUEST
         } else {
-            use pnet_packet::icmpv6::echo_request::MutableEchoRequestPacket;
+            ICMPV6_TYPE_ECHO_REQUEST
+        };
 
-            let mut buf = BytesMut::zeroed(8 + payload.len());
+        buf[0] = echo_type;
+        // buf[1] = 0 (code, already zeroed)
+        // buf[2..4] = checksum, computed below
+        buf[4..6].copy_from_slice(&identifier.to_be_bytes());
+        buf[6..8].copy_from_slice(&sequence_number.to_be_bytes());
+        buf[ICMP_HEADER_LEN..].copy_from_slice(payload);
 
-            let mut packet = MutableEchoRequestPacket::new(&mut buf).unwrap();
-            packet.set_icmpv6_type(Icmpv6Types::EchoRequest);
-            packet.set_identifier(identifier);
-            packet.set_sequence_number(sequence_number);
-            packet.set_payload(payload);
-            packet.set_checksum(util::checksum(packet.packet(), 1));
+        let checksum = internet_checksum(&buf);
+        buf[2..4].copy_from_slice(&checksum.to_be_bytes());
 
-            let packet_len = packet.packet().len();
-            debug_assert_eq!(buf.len(), packet_len);
-
-            Self::from_buf(buf.freeze())
-        }
-    }
-
-    fn from_buf(buf: Bytes) -> Self {
         Self {
-            buf,
+            buf: buf.freeze(),
             _version: PhantomData,
         }
     }
@@ -81,37 +71,30 @@ impl<V: IpVersion> EchoRequestPacket<V> {
 impl<V: IpVersion> EchoReplyPacket<V> {
     /// Parse an ICMP echo reply packet
     pub(crate) fn from_reply(source: V, buf: Bytes) -> Option<Self> {
-        if V::IS_V4 {
-            if let Some(icmp_packet) = IcmpPacket::new(&buf) {
-                if icmp_packet.get_icmp_type() == IcmpTypes::EchoReply {
-                    use pnet_packet::icmp::echo_reply::EchoReplyPacket;
-
-                    if let Some(echo_reply_packet) = EchoReplyPacket::new(&buf) {
-                        return Some(Self {
-                            source,
-                            identifier: echo_reply_packet.get_identifier(),
-                            sequence_number: echo_reply_packet.get_sequence_number(),
-                            payload: buf.slice_ref(echo_reply_packet.payload()),
-                        });
-                    }
-                }
-            }
-        } else if let Some(icmp_packet) = Icmpv6Packet::new(&buf) {
-            if icmp_packet.get_icmpv6_type() == Icmpv6Types::EchoReply {
-                use pnet_packet::icmpv6::echo_reply::EchoReplyPacket;
-
-                if let Some(echo_reply_packet) = EchoReplyPacket::new(&buf) {
-                    return Some(Self {
-                        source,
-                        identifier: echo_reply_packet.get_identifier(),
-                        sequence_number: echo_reply_packet.get_sequence_number(),
-                        payload: buf.slice_ref(echo_reply_packet.payload()),
-                    });
-                }
-            }
+        if buf.len() < ICMP_HEADER_LEN {
+            return None;
         }
 
-        None
+        let expected_type = if V::IS_V4 {
+            ICMPV4_TYPE_ECHO_REPLY
+        } else {
+            ICMPV6_TYPE_ECHO_REPLY
+        };
+
+        if buf[0] != expected_type {
+            return None;
+        }
+
+        let identifier = u16::from_be_bytes([buf[4], buf[5]]);
+        let sequence_number = u16::from_be_bytes([buf[6], buf[7]]);
+        let payload = buf.slice(ICMP_HEADER_LEN..);
+
+        Some(Self {
+            source,
+            identifier,
+            sequence_number,
+            payload,
+        })
     }
 
     /// Get the source IP address
@@ -133,6 +116,27 @@ impl<V: IpVersion> EchoReplyPacket<V> {
     pub fn payload(&self) -> &[u8] {
         &self.payload
     }
+}
+
+/// Compute the internet checksum (RFC 1071) over the given data.
+fn internet_checksum(data: &[u8]) -> u16 {
+    let mut sum = 0u32;
+    let mut i = 0;
+
+    while i + 1 < data.len() {
+        sum += u16::from_be_bytes([data[i], data[i + 1]]) as u32;
+        i += 2;
+    }
+
+    if i < data.len() {
+        sum += (data[i] as u32) << 8;
+    }
+
+    while sum >> 16 != 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    !sum as u16
 }
 
 #[cfg(test)]
