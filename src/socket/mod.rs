@@ -36,7 +36,8 @@ impl Socket {
 
             match guard.try_io(|inner| inner.get_ref().recv(buf.spare_capacity_mut())) {
                 Ok(Ok((n, source))) => {
-                    // SAFETY: `poll_recv` guarantees that `n` has been filled
+                    // SAFETY: `BaseSocket::recv` guarantees that the first
+                    // `n` bytes of the spare capacity have been filled
                     unsafe { buf.advance_mut(n) }
 
                     return Poll::Ready(Ok((buf.split().freeze(), source)));

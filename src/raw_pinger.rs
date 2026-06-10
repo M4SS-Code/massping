@@ -20,6 +20,10 @@ pub type RawV4Pinger = RawPinger<Ipv4Addr>;
 pub type RawV6Pinger = RawPinger<Ipv6Addr>;
 
 /// Asynchronous pinger
+///
+/// The underlying socket remembers at most one waker per direction, so at
+/// most one task should be sending and one task receiving at any given
+/// time; concurrent polls in the same direction can lose wakeups.
 pub struct RawPinger<V: IpVersion> {
     socket: Socket,
     _version: PhantomData<V>,
@@ -58,6 +62,8 @@ impl<V: IpVersion> RawPinger<V> {
     }
 
     /// Receive an ICMP ECHO reply packet
+    ///
+    /// Replies larger than 2048 bytes are silently truncated.
     pub fn recv(&self) -> RecvFuture<'_, V> {
         RecvFuture {
             pinger: self,
@@ -66,6 +72,8 @@ impl<V: IpVersion> RawPinger<V> {
     }
 
     /// Receive an ICMP ECHO reply packet
+    ///
+    /// Replies larger than 2048 bytes are silently truncated.
     pub fn poll_recv(
         &self,
         buf: &mut BytesMut,
@@ -113,7 +121,6 @@ impl<V: IpVersion> Future for RecvFuture<'_, V> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let packet = ready!(self.pinger.poll_recv(&mut self.buf, cx))?;
-        // SAFETY: `RawPinger` already checked that the packet is valid
         Poll::Ready(Ok(packet))
     }
 }

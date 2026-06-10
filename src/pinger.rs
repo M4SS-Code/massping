@@ -72,9 +72,14 @@ impl<V: IpVersion> Pinger<V> {
     /// Construct a new `Pinger`.
     ///
     /// For maximum efficiency the same instance of `Pinger` should
-    /// be used for as long as possible, altough it might also
+    /// be used for as long as possible, although it might also
     /// be beneficial to `Drop` the `Pinger` and recreate it if
     /// you are not going to be sending pings for a long period of time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from outside a tokio runtime, as it spawns a
+    /// background receive task.
     pub fn new() -> io::Result<Self> {
         let raw = RawPinger::new()?;
 
@@ -220,6 +225,12 @@ impl<V: IpVersion> Pinger<V> {
     /// multiple times is only pinged once per round and yields a single
     /// measurement.
     ///
+    /// # Panics
+    ///
+    /// Panics if the background receive task has terminated, which only
+    /// happens when the runtime the `Pinger` was created on has been
+    /// shut down.
+    ///
     /// [`Stream`]: futures_core::Stream
     pub fn measure_many<I>(&self, addresses: I) -> MeasureManyStream<'_, V, I>
     where
@@ -272,7 +283,8 @@ impl<V: IpVersion> Pinger<V> {
 /// like [`tokio::time::timeout`] should be used to prevent the program
 /// from hanging indefinitely.
 ///
-/// Leaking this method might crate a slowly forever growing memory leak.
+/// Leaking this stream may create a memory leak that lasts until the
+/// [`Pinger`] is dropped.
 ///
 /// [`Stream`]: futures_core::Stream
 /// [`tokio::time::timeout`]: tokio::time::timeout

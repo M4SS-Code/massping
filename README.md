@@ -6,8 +6,12 @@
 [![Rustc Version 1.85.0+](https://img.shields.io/badge/rustc-1.85.0+-lightgray.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/)
 [![CI](https://github.com/M4SS-Code/massping/actions/workflows/ci.yml/badge.svg)](https://github.com/M4SS-Code/massping/actions/workflows/ci.yml)
 
-Asynchronous ICMP ping library using Linux RAW sockets and the
+Asynchronous ICMP ping library using Linux DGRAM sockets and the
 tokio runtime.
+
+This crate uses `SOCK_DGRAM` sockets with `IPPROTO_ICMP`/`IPPROTO_ICMPV6`
+("ping sockets"), which allows sending ICMP echo requests without root
+privileges on Linux.
 
 ## Features
 

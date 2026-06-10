@@ -57,9 +57,14 @@ impl DualstackPinger {
     /// Construct a new `DualstackPinger`.
     ///
     /// For maximum efficiency the same instance of `DualstackPinger` should
-    /// be used for as long as possible, altough it might also
+    /// be used for as long as possible, although it might also
     /// be beneficial to `Drop` the `DualstackPinger` and recreate it if
     /// you are not going to be sending pings for a long period of time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from outside a tokio runtime, as it spawns
+    /// background receive tasks.
     pub fn new() -> io::Result<Self> {
         let v4 = V4Pinger::new()?;
         let v6 = V6Pinger::new()?;
@@ -70,6 +75,10 @@ impl DualstackPinger {
     ///
     /// Creates [`DualstackMeasureManyStream`] which **lazily** sends ping
     /// requests and [`Stream`]s the responses as they arrive.
+    ///
+    /// # Panics
+    ///
+    /// See [`Pinger::measure_many`].
     ///
     /// [`Stream`]: futures_core::Stream
     pub fn measure_many<I>(&self, addresses: I) -> DualstackMeasureManyStream<'_, I>
@@ -100,7 +109,8 @@ impl DualstackPinger {
 /// like [`tokio::time::timeout`] should be used to prevent the program
 /// from hanging indefinitely.
 ///
-/// Leaking this method might crate a slowly forever growing memory leak.
+/// Leaking this stream may create a memory leak that lasts until the
+/// [`DualstackPinger`] is dropped.
 ///
 /// [`Stream`]: futures_core::Stream
 /// [`tokio::time::timeout`]: tokio::time::timeout
