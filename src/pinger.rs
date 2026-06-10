@@ -30,12 +30,24 @@ pub type V4Pinger = Pinger<Ipv4Addr>;
 pub type V6Pinger = Pinger<Ipv6Addr>;
 
 /// A pinger for [`IpVersion`] (either [`Ipv4Addr`] or [`Ipv6Addr`]).
+///
+/// Cloning is cheap: clones share the same socket and background
+/// receive task, which shut down when the last clone is dropped.
 pub struct Pinger<V: IpVersion> {
     inner: Arc<InnerPinger<V>>,
     // Kept out of `InnerPinger` (which the background receive task holds)
-    // so that dropping the `Pinger` disconnects the channel, telling the
-    // background task to shut down and release the socket.
+    // so that dropping the last `Pinger` clone disconnects the channel,
+    // telling the background task to shut down and release the socket.
     round_sender: mpsc::UnboundedSender<RoundMessage<V>>,
+}
+
+impl<V: IpVersion> Clone for Pinger<V> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            round_sender: self.round_sender.clone(),
+        }
+    }
 }
 
 struct InnerPinger<V: IpVersion> {
@@ -288,6 +300,7 @@ impl<V: IpVersion> Pinger<V> {
 ///
 /// [`Stream`]: futures_core::Stream
 /// [`tokio::time::timeout`]: tokio::time::timeout
+#[must_use = "streams do nothing unless polled"]
 pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
     pinger: &'a Pinger<V>,
     packet: EchoRequestPacket<V>,

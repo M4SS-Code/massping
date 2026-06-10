@@ -48,6 +48,10 @@ pub mod raw_pinger;
 mod socket;
 
 /// A pinger for both [`Ipv4Addr`] and [`Ipv6Addr`] addresses.
+///
+/// Cloning is cheap: clones share the same sockets and background
+/// receive tasks, which shut down when the last clone is dropped.
+#[derive(Clone)]
 pub struct DualstackPinger {
     v4: V4Pinger,
     v6: V6Pinger,
@@ -114,6 +118,7 @@ impl DualstackPinger {
 ///
 /// [`Stream`]: futures_core::Stream
 /// [`tokio::time::timeout`]: tokio::time::timeout
+#[must_use = "streams do nothing unless polled"]
 pub struct DualstackMeasureManyStream<'a, I: Iterator<Item = IpAddr>> {
     v4: MeasureManyStream<'a, Ipv4Addr, FilterIpAddr<I, Ipv4Addr>>,
     v6: MeasureManyStream<'a, Ipv6Addr, FilterIpAddr<I, Ipv6Addr>>,
