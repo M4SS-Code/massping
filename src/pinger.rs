@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 #[cfg(feature = "stream")]
 use futures_core::Stream;
 use tokio::{
@@ -50,6 +50,7 @@ struct InnerPinger<V: IpVersion> {
 enum RoundMessage<V: IpVersion> {
     Subscribe {
         round_id: u64,
+        expected_payload: Bytes,
         sender: mpsc::UnboundedSender<(V, Instant)>,
     },
     Unsubscribe {
@@ -59,6 +60,7 @@ enum RoundMessage<V: IpVersion> {
 
 struct Subscriber<V: IpVersion> {
     round_id: u64,
+    expected_payload: Bytes,
     sender: mpsc::UnboundedSender<(V, Instant)>,
 }
 
@@ -148,13 +150,21 @@ impl<V: IpVersion> Pinger<V> {
                 match result {
                     Some(PollResult::Subscription(RoundMessage::Subscribe {
                         round_id,
+                        expected_payload,
                         sender,
                     })) => {
                         // A new round may displace a still-subscribed round
                         // whose sequence number collided after wraparound;
                         // the displaced round could not be served anyway as
                         // replies can only be told apart by sequence number.
-                        subscribers.insert(round_id as u16, Subscriber { round_id, sender });
+                        subscribers.insert(
+                            round_id as u16,
+                            Subscriber {
+                                round_id,
+                                expected_payload,
+                                sender,
+                            },
+                        );
                     }
                     Some(PollResult::Subscription(RoundMessage::Unsubscribe { round_id })) => {
                         let sequence_number = round_id as u16;
@@ -176,10 +186,19 @@ impl<V: IpVersion> Pinger<V> {
                         let packet_sequence_number = packet.sequence_number();
 
                         if let Some(subscriber) = subscribers.get(&packet_sequence_number) {
-                            if subscriber
-                                .sender
-                                .send((packet_source, recv_instant))
-                                .is_err()
+                            // An echo reply mirrors the request's payload, so
+                            // a mismatch means the reply wasn't produced by
+                            // this round (e.g. a reply to an older round whose
+                            // sequence number collided after wraparound, or
+                            // blindly spoofed cross-traffic). Discard it.
+                            let payload_matches =
+                                packet.payload() == &subscriber.expected_payload[..];
+
+                            if payload_matches
+                                && subscriber
+                                    .sender
+                                    .send((packet_source, recv_instant))
+                                    .is_err()
                             {
                                 subscribers.remove(&packet_sequence_number);
                             }
@@ -217,9 +236,20 @@ impl<V: IpVersion> Pinger<V> {
         // Relaxed is enough: the counter is a pure id allocator, no other
         // memory is synchronized through it.
         let round_id = self.inner.next_round_id.fetch_add(1, Ordering::Relaxed);
+
+        // The same packet is reused for every address of the round. Its
+        // random payload lets the receive task discard replies that don't
+        // belong to this round.
+        let payload = rand::random::<[u8; 64]>();
+        let packet = EchoRequestPacket::new(self.inner.identifier, round_id as u16, &payload);
+
         if self
             .round_sender
-            .send(RoundMessage::Subscribe { round_id, sender })
+            .send(RoundMessage::Subscribe {
+                round_id,
+                expected_payload: packet.payload(),
+                sender,
+            })
             .is_err()
         {
             panic!("Receiver closed");
@@ -227,6 +257,7 @@ impl<V: IpVersion> Pinger<V> {
 
         MeasureManyStream {
             pinger: self,
+            packet,
             send_queue,
             in_flight: HashMap::with_capacity(size_hint),
             receiver,
@@ -247,6 +278,7 @@ impl<V: IpVersion> Pinger<V> {
 /// [`tokio::time::timeout`]: tokio::time::timeout
 pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
     pinger: &'a Pinger<V>,
+    packet: EchoRequestPacket<V>,
     send_queue: Peekable<I>,
     in_flight: HashMap<V, Instant>,
     receiver: mpsc::UnboundedReceiver<(V, Instant)>,
@@ -282,14 +314,7 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
                 continue;
             }
 
-            let payload = rand::random::<[u8; 64]>();
-
-            let packet = EchoRequestPacket::new(
-                self.pinger.inner.identifier,
-                self.round_id as u16,
-                &payload,
-            );
-            match self.pinger.inner.raw.poll_send_to(cx, addr, &packet) {
+            match self.pinger.inner.raw.poll_send_to(cx, addr, &self.packet) {
                 Poll::Ready(result) => {
                     let sent_at = Instant::now();
 
