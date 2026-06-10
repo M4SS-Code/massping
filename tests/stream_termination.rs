@@ -45,9 +45,8 @@ async fn stream_terminates_after_single_ping() {
 
 /// Test that the stream properly terminates after receiving multiple responses.
 ///
-/// Note: We use different addresses because `in_flight` is keyed by address,
-/// so pinging the same address multiple times in one `measure_many` call
-/// would overwrite the previous entry.
+/// Note: We use different addresses because replies are matched by source
+/// address, so duplicate addresses yield a single measurement per round.
 #[tokio::test(flavor = "current_thread")]
 async fn stream_terminates_after_multiple_pings() {
     let pinger = DualstackPinger::new().unwrap();
@@ -75,6 +74,29 @@ async fn stream_terminates_after_multiple_pings() {
         "stream did not terminate - hung in while let loop"
     );
     assert_eq!(count, 3, "expected exactly 3 ping responses");
+}
+
+/// Test that duplicate addresses yield a single measurement and terminate.
+///
+/// Replies are matched by source address within a round, so a duplicate
+/// can never yield a second measurement; it is only pinged once.
+#[tokio::test(flavor = "current_thread")]
+async fn duplicate_addresses_yield_single_measurement() {
+    let pinger = DualstackPinger::new().unwrap();
+    let localhost: IpAddr = "127.0.0.1".parse().unwrap();
+    let mut stream = pinger.measure_many([localhost, localhost, localhost].into_iter());
+
+    let mut count = 0;
+
+    let result = time::timeout(Duration::from_secs(5), async {
+        while stream.next().await.is_some() {
+            count += 1;
+        }
+    })
+    .await;
+
+    assert!(result.is_ok(), "stream did not terminate");
+    assert_eq!(count, 1, "duplicates should collapse into one measurement");
 }
 
 /// Test that the stream terminates when sends fail immediately.

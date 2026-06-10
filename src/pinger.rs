@@ -201,6 +201,10 @@ impl<V: IpVersion> Pinger<V> {
     /// Creates [`MeasureManyStream`] which **lazily** sends ping
     /// requests and [`Stream`]s the responses as they arrive.
     ///
+    /// Replies are matched by source address, so an address that appears
+    /// multiple times is only pinged once per round and yields a single
+    /// measurement.
+    ///
     /// [`Stream`]: futures_core::Stream
     pub fn measure_many<I>(&self, addresses: I) -> MeasureManyStream<'_, V, I>
     where
@@ -269,6 +273,15 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
 
     fn poll_next_icmp_replies(&mut self, cx: &mut Context<'_>) {
         while let Some(&addr) = self.send_queue.peek() {
+            // Replies are matched by source address within a round, so a
+            // second ping to an address that is still awaiting its reply
+            // could never produce a second measurement; it would only
+            // clobber the first ping's start time. Skip the duplicate.
+            if self.in_flight.contains_key(&addr) {
+                self.send_queue.next();
+                continue;
+            }
+
             let payload = rand::random::<[u8; 64]>();
 
             let packet = EchoRequestPacket::new(
