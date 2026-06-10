@@ -8,7 +8,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
     sync::{
         Arc,
-        atomic::{AtomicU16, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
     task::{Context, Poll},
     time::Duration,
@@ -41,17 +41,25 @@ pub struct Pinger<V: IpVersion> {
 struct InnerPinger<V: IpVersion> {
     raw: RawPinger<V>,
     identifier: u16,
-    sequence_number: AtomicU16,
+    next_round_id: AtomicU64,
 }
 
+// Each `measure_many` round gets a unique `u64` id; the wire sequence
+// number is its lower 16 bits. The full id lets the receive task tell
+// rounds apart after the sequence number wraps around.
 enum RoundMessage<V: IpVersion> {
     Subscribe {
-        sequence_number: u16,
+        round_id: u64,
         sender: mpsc::UnboundedSender<(V, Instant)>,
     },
     Unsubscribe {
-        sequence_number: u16,
+        round_id: u64,
     },
+}
+
+struct Subscriber<V: IpVersion> {
+    round_id: u64,
+    sender: mpsc::UnboundedSender<(V, Instant)>,
 }
 
 enum PollResult<V: IpVersion> {
@@ -76,7 +84,7 @@ impl<V: IpVersion> Pinger<V> {
         let inner = Arc::new(InnerPinger {
             raw,
             identifier,
-            sequence_number: AtomicU16::new(0),
+            next_round_id: AtomicU64::new(0),
         });
 
         // Spawn async receive task using the same socket.
@@ -84,7 +92,7 @@ impl<V: IpVersion> Pinger<V> {
         // `Pinger` holding the only sender is dropped.
         let inner_recv = Arc::clone(&inner);
         tokio::spawn(async move {
-            let mut subscribers: HashMap<u16, mpsc::UnboundedSender<(V, Instant)>> = HashMap::new();
+            let mut subscribers: HashMap<u16, Subscriber<V>> = HashMap::new();
             // Buffer kept outside poll_fn so it persists across polls.
             let mut recv_buf = BytesMut::new();
 
@@ -139,15 +147,27 @@ impl<V: IpVersion> Pinger<V> {
 
                 match result {
                     Some(PollResult::Subscription(RoundMessage::Subscribe {
-                        sequence_number,
+                        round_id,
                         sender,
                     })) => {
-                        subscribers.insert(sequence_number, sender);
+                        // A new round may displace a still-subscribed round
+                        // whose sequence number collided after wraparound;
+                        // the displaced round could not be served anyway as
+                        // replies can only be told apart by sequence number.
+                        subscribers.insert(round_id as u16, Subscriber { round_id, sender });
                     }
-                    Some(PollResult::Subscription(RoundMessage::Unsubscribe {
-                        sequence_number,
-                    })) => {
-                        subscribers.remove(&sequence_number);
+                    Some(PollResult::Subscription(RoundMessage::Unsubscribe { round_id })) => {
+                        let sequence_number = round_id as u16;
+                        // Only unsubscribe if the slot still belongs to this
+                        // round: after sequence number wraparound it may have
+                        // been taken over by a newer round, which must keep
+                        // receiving replies.
+                        if subscribers
+                            .get(&sequence_number)
+                            .is_some_and(|subscriber| subscriber.round_id == round_id)
+                        {
+                            subscribers.remove(&sequence_number);
+                        }
                     }
                     Some(PollResult::Packet(packet)) => {
                         let recv_instant = Instant::now();
@@ -156,7 +176,11 @@ impl<V: IpVersion> Pinger<V> {
                         let packet_sequence_number = packet.sequence_number();
 
                         if let Some(subscriber) = subscribers.get(&packet_sequence_number) {
-                            if subscriber.send((packet_source, recv_instant)).is_err() {
+                            if subscriber
+                                .sender
+                                .send((packet_source, recv_instant))
+                                .is_err()
+                            {
                                 subscribers.remove(&packet_sequence_number);
                             }
                         }
@@ -186,13 +210,12 @@ impl<V: IpVersion> Pinger<V> {
         let send_queue = addresses.into_iter().peekable();
         let (sender, receiver) = mpsc::unbounded_channel();
 
-        let sequence_number = self.inner.sequence_number.fetch_add(1, Ordering::AcqRel);
+        // Relaxed is enough: the counter is a pure id allocator, no other
+        // memory is synchronized through it.
+        let round_id = self.inner.next_round_id.fetch_add(1, Ordering::Relaxed);
         if self
             .round_sender
-            .send(RoundMessage::Subscribe {
-                sequence_number,
-                sender,
-            })
+            .send(RoundMessage::Subscribe { round_id, sender })
             .is_err()
         {
             panic!("Receiver closed");
@@ -203,7 +226,7 @@ impl<V: IpVersion> Pinger<V> {
             send_queue,
             in_flight: HashMap::with_capacity(size_hint),
             receiver,
-            sequence_number,
+            round_id,
         }
     }
 }
@@ -223,7 +246,7 @@ pub struct MeasureManyStream<'a, V: IpVersion, I: Iterator<Item = V>> {
     send_queue: Peekable<I>,
     in_flight: HashMap<V, Instant>,
     receiver: mpsc::UnboundedReceiver<(V, Instant)>,
-    sequence_number: u16,
+    round_id: u64,
 }
 
 impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
@@ -250,7 +273,7 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
 
             let packet = EchoRequestPacket::new(
                 self.pinger.inner.identifier,
-                self.sequence_number,
+                self.round_id as u16,
                 &payload,
             );
             match self.pinger.inner.raw.poll_send_to(cx, addr, &packet) {
@@ -313,7 +336,7 @@ impl<V: IpVersion, I: Iterator<Item = V> + Unpin> Stream for MeasureManyStream<'
 impl<V: IpVersion, I: Iterator<Item = V>> Drop for MeasureManyStream<'_, V, I> {
     fn drop(&mut self) {
         let _ = self.pinger.round_sender.send(RoundMessage::Unsubscribe {
-            sequence_number: self.sequence_number,
+            round_id: self.round_id,
         });
     }
 }
