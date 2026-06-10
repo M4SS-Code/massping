@@ -96,6 +96,7 @@ impl<V: IpVersion> RawPinger<V> {
 }
 
 /// [`Future`] obtained from [`RawPinger::send_to`].
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct SendFuture<'a, V: IpVersion> {
     pinger: &'a RawPinger<V>,
     addr: V,
@@ -111,6 +112,7 @@ impl<V: IpVersion> Future for SendFuture<'_, V> {
 }
 
 /// [`Future`] obtained from [`RawPinger::recv`].
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct RecvFuture<'a, V: IpVersion> {
     pinger: &'a RawPinger<V>,
     buf: BytesMut,
