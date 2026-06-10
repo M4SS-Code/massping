@@ -38,6 +38,13 @@ pub struct EchoReplyPacket<V: IpVersion> {
 
 impl<V: IpVersion> EchoRequestPacket<V> {
     /// Build a new ICMP echo request packet
+    ///
+    /// Note that when the packet is sent through a Linux `SOCK_DGRAM` ICMP
+    /// socket ("ping socket"), as done by this crate, the kernel overwrites
+    /// `identifier` with the socket's own identifier and recomputes the
+    /// checksum. The kernel also delivers only the echo replies whose
+    /// identifier matches the socket, so replies don't need to be checked
+    /// against the value given here.
     pub fn new(identifier: u16, sequence_number: u16, payload: &[u8]) -> Self {
         let mut buf = BytesMut::zeroed(ICMP_HEADER_LEN + payload.len());
 
@@ -108,6 +115,9 @@ impl<V: IpVersion> EchoReplyPacket<V> {
     }
 
     /// Get the ICMP packet identifier
+    ///
+    /// On Linux ping sockets this is the kernel-assigned identifier of the
+    /// receiving socket, not the value passed to [`EchoRequestPacket::new`].
     pub fn identifier(&self) -> u16 {
         self.identifier
     }
