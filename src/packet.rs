@@ -66,6 +66,11 @@ impl<V: IpVersion> EchoRequestPacket<V> {
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.buf
     }
+
+    /// Get the payload of this echo request.
+    pub(crate) fn payload(&self) -> Bytes {
+        self.buf.slice(ICMP_HEADER_LEN..)
+    }
 }
 
 impl<V: IpVersion> EchoReplyPacket<V> {
