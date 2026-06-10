@@ -40,7 +40,6 @@ pub struct Pinger<V: IpVersion> {
 
 struct InnerPinger<V: IpVersion> {
     raw: RawPinger<V>,
-    identifier: u16,
     next_round_id: AtomicU64,
 }
 
@@ -79,13 +78,10 @@ impl<V: IpVersion> Pinger<V> {
     pub fn new() -> io::Result<Self> {
         let raw = RawPinger::new()?;
 
-        let identifier = rand::random::<u16>();
-
         let (sender, mut receiver) = mpsc::unbounded_channel();
 
         let inner = Arc::new(InnerPinger {
             raw,
-            identifier,
             next_round_id: AtomicU64::new(0),
         });
 
@@ -240,8 +236,12 @@ impl<V: IpVersion> Pinger<V> {
         // The same packet is reused for every address of the round. Its
         // random payload lets the receive task discard replies that don't
         // belong to this round.
+        //
+        // The identifier is irrelevant: the kernel overwrites it with the
+        // socket's own identifier, which it also uses to route echo replies
+        // back to this socket.
         let payload = rand::random::<[u8; 64]>();
-        let packet = EchoRequestPacket::new(self.inner.identifier, round_id as u16, &payload);
+        let packet = EchoRequestPacket::new(0, round_id as u16, &payload);
 
         if self
             .round_sender
