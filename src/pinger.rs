@@ -32,11 +32,14 @@ pub type V6Pinger = Pinger<Ipv6Addr>;
 /// A pinger for [`IpVersion`] (either [`Ipv4Addr`] or [`Ipv6Addr`]).
 pub struct Pinger<V: IpVersion> {
     inner: Arc<InnerPinger<V>>,
+    // Kept out of `InnerPinger` (which the background receive task holds)
+    // so that dropping the `Pinger` disconnects the channel, telling the
+    // background task to shut down and release the socket.
+    round_sender: mpsc::UnboundedSender<RoundMessage<V>>,
 }
 
 struct InnerPinger<V: IpVersion> {
     raw: RawPinger<V>,
-    round_sender: mpsc::UnboundedSender<RoundMessage<V>>,
     identifier: u16,
     sequence_number: AtomicU16,
 }
@@ -72,12 +75,13 @@ impl<V: IpVersion> Pinger<V> {
 
         let inner = Arc::new(InnerPinger {
             raw,
-            round_sender: sender,
             identifier,
             sequence_number: AtomicU16::new(0),
         });
 
-        // Spawn async receive task using the same socket
+        // Spawn async receive task using the same socket.
+        // It runs until `receiver` disconnects, which happens when the
+        // `Pinger` holding the only sender is dropped.
         let inner_recv = Arc::clone(&inner);
         tokio::spawn(async move {
             let mut subscribers: HashMap<u16, mpsc::UnboundedSender<(V, Instant)>> = HashMap::new();
@@ -151,7 +155,10 @@ impl<V: IpVersion> Pinger<V> {
             }
         });
 
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            round_sender: sender,
+        })
     }
 
     /// Ping `addresses`
@@ -170,7 +177,6 @@ impl<V: IpVersion> Pinger<V> {
 
         let sequence_number = self.inner.sequence_number.fetch_add(1, Ordering::AcqRel);
         if self
-            .inner
             .round_sender
             .send(RoundMessage::Subscribe {
                 sequence_number,
@@ -285,12 +291,8 @@ impl<V: IpVersion, I: Iterator<Item = V> + Unpin> Stream for MeasureManyStream<'
 
 impl<V: IpVersion, I: Iterator<Item = V>> Drop for MeasureManyStream<'_, V, I> {
     fn drop(&mut self) {
-        let _ = self
-            .pinger
-            .inner
-            .round_sender
-            .send(RoundMessage::Unsubscribe {
-                sequence_number: self.sequence_number,
-            });
+        let _ = self.pinger.round_sender.send(RoundMessage::Unsubscribe {
+            sequence_number: self.sequence_number,
+        });
     }
 }
