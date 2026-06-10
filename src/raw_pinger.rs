@@ -72,8 +72,12 @@ impl<V: IpVersion> RawPinger<V> {
         cx: &mut Context<'_>,
     ) -> Poll<io::Result<EchoReplyPacket<V>>> {
         let (buf, source) = ready!(self.socket.poll_read(buf, cx))?;
-        let source = V::from_ip_addr(source.ip()).unwrap();
-        match EchoReplyPacket::from_reply(source, buf) {
+        // Skip packets that don't come from the expected address family or
+        // aren't valid echo replies, and ask to be polled again: more
+        // packets may already be queued on the socket.
+        let packet = V::from_ip_addr(source.ip())
+            .and_then(|source| EchoReplyPacket::from_reply(source, buf));
+        match packet {
             Some(packet) => Poll::Ready(Ok(packet)),
             None => {
                 cx.waker().wake_by_ref();
