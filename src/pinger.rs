@@ -237,13 +237,18 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
                 &payload,
             );
             match self.pinger.inner.raw.poll_send_to(cx, addr, &packet) {
-                Poll::Ready(_) => {
+                Poll::Ready(result) => {
                     let sent_at = Instant::now();
 
                     let taken_addr = self.send_queue.next();
                     debug_assert!(taken_addr.is_some());
 
-                    self.in_flight.insert(addr, sent_at);
+                    // If the send failed (e.g. no route to host) no reply
+                    // can ever arrive, so don't track the address as
+                    // in-flight or the stream would never terminate.
+                    if result.is_ok() {
+                        self.in_flight.insert(addr, sent_at);
+                    }
                 }
                 Poll::Pending => break,
             }

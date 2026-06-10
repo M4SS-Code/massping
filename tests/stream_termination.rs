@@ -4,10 +4,13 @@
 //! ping requests have been sent and all responses have been received. Without
 //! this, `while let Some(...) = stream.next().await` loops hang forever.
 
-use std::{net::IpAddr, time::Duration};
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    time::Duration,
+};
 
 use futures_util::StreamExt;
-use massping::DualstackPinger;
+use massping::{DualstackPinger, V4Pinger};
 use tokio::time;
 
 /// Test that the stream properly terminates after receiving all responses.
@@ -72,6 +75,34 @@ async fn stream_terminates_after_multiple_pings() {
         "stream did not terminate - hung in while let loop"
     );
     assert_eq!(count, 3, "expected exactly 3 ping responses");
+}
+
+/// Test that the stream terminates when sends fail immediately.
+///
+/// `sendto` fails synchronously with `EACCES` for the broadcast address
+/// (the socket doesn't have `SO_BROADCAST`), so no reply can ever arrive.
+/// The stream must not wait for one forever.
+#[tokio::test(flavor = "current_thread")]
+async fn stream_terminates_when_send_fails() {
+    let pinger = V4Pinger::new().unwrap();
+
+    let addresses: [Ipv4Addr; 1] = ["255.255.255.255".parse().unwrap()];
+    let mut stream = pinger.measure_many(addresses.into_iter());
+
+    let mut count = 0;
+
+    let result = time::timeout(Duration::from_secs(2), async {
+        while stream.next().await.is_some() {
+            count += 1;
+        }
+    })
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "stream did not terminate after failed sends"
+    );
+    assert_eq!(count, 0, "expected no responses for unsendable addresses");
 }
 
 /// Test that an empty address list terminates immediately.
