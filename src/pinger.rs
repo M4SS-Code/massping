@@ -267,7 +267,17 @@ impl<V: IpVersion, I: Iterator<Item = V>> MeasureManyStream<'_, V, I> {
                         self.in_flight.insert(addr, sent_at);
                     }
                 }
-                Poll::Pending => break,
+                Poll::Pending => {
+                    // The socket only remembers the most recent waker per
+                    // direction (`AsyncFd` semantics), so with multiple
+                    // streams sharing the socket another stream could
+                    // overwrite ours and we'd never be woken again. Sends
+                    // only return `Pending` while the send buffer is full,
+                    // which clears up quickly, so schedule an immediate
+                    // re-poll instead of parking.
+                    cx.waker().wake_by_ref();
+                    break;
+                }
             }
         }
     }
