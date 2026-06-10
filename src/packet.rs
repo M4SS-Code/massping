@@ -156,11 +156,71 @@ fn internet_checksum(data: &[u8]) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     use bytes::Bytes;
 
-    use super::EchoReplyPacket;
+    use super::{EchoReplyPacket, EchoRequestPacket, internet_checksum};
+
+    /// Well-known example from the "Internet checksum" Wikipedia article:
+    /// an IPv4 header (checksum field zeroed) whose checksum is 0xB861.
+    #[test]
+    fn internet_checksum_reference_vector() {
+        let ip_header = [
+            0x45, 0x00, 0x00, 0x73, 0x00, 0x00, 0x40, 0x00, 0x40, 0x11, 0x00, 0x00, 0xc0, 0xa8,
+            0x00, 0x01, 0xc0, 0xa8, 0x00, 0xc7,
+        ];
+        assert_eq!(internet_checksum(&ip_header), 0xb861);
+    }
+
+    #[test]
+    fn internet_checksum_empty() {
+        assert_eq!(internet_checksum(&[]), 0xffff);
+    }
+
+    /// The end-around carry must be folded back into the sum.
+    #[test]
+    fn internet_checksum_folds_carry() {
+        assert_eq!(internet_checksum(&[0xff; 8]), 0x0000);
+    }
+
+    /// The trailing byte of odd-length data is padded with a zero byte,
+    /// i.e. it forms the high-order byte of the last 16-bit word.
+    #[test]
+    fn internet_checksum_odd_length() {
+        assert_eq!(internet_checksum(&[0x01, 0x02, 0x03]), !(0x0102 + 0x0300));
+    }
+
+    #[test]
+    fn echo_request_packet_v4_layout() {
+        let packet = EchoRequestPacket::<Ipv4Addr>::new(0x1234, 0x5678, b"test");
+        let buf = packet.as_bytes();
+
+        assert_eq!(buf.len(), 12);
+        assert_eq!(buf[0], 8, "ICMPv4 echo request type");
+        assert_eq!(buf[1], 0, "code");
+        assert_eq!(buf[2..4], 0xa779u16.to_be_bytes(), "checksum");
+        assert_eq!(buf[4..6], 0x1234u16.to_be_bytes(), "identifier");
+        assert_eq!(buf[6..8], 0x5678u16.to_be_bytes(), "sequence number");
+        assert_eq!(&buf[8..], b"test");
+
+        // A packet whose checksum field is correct sums to zero.
+        assert_eq!(internet_checksum(buf), 0);
+        assert_eq!(&packet.payload()[..], b"test");
+    }
+
+    #[test]
+    fn echo_request_packet_v6_uses_icmpv6_type() {
+        // Odd-length payload to also exercise the checksum padding.
+        let packet = EchoRequestPacket::<Ipv6Addr>::new(1, 2, b"abc");
+        let buf = packet.as_bytes();
+
+        assert_eq!(buf[0], 128, "ICMPv6 echo request type");
+        // The kernel recomputes the ICMPv6 checksum (it includes a
+        // pseudo-header userspace can't know), but the packet must still be
+        // self-consistent under the plain internet checksum.
+        assert_eq!(internet_checksum(buf), 0);
+    }
 
     #[test]
     fn from_reply_rejects_truncated_packet() {
