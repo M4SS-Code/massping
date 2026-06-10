@@ -107,10 +107,21 @@ impl<V: IpVersion> Pinger<V> {
                     }
 
                     // Try to receive an ICMP packet
-                    if let Poll::Ready(Ok(packet)) = inner_recv.raw.poll_recv(&mut recv_buf, cx) {
-                        return Poll::Ready(Some(PollResult::Packet(packet)));
+                    match inner_recv.raw.poll_recv(&mut recv_buf, cx) {
+                        Poll::Ready(Ok(packet)) => {
+                            return Poll::Ready(Some(PollResult::Packet(packet)));
+                        }
+                        Poll::Ready(Err(_)) => {
+                            // Receiving failed (typically a transient kernel
+                            // resource error). The socket readiness was
+                            // consumed without registering a waker, so ask to
+                            // be polled again right away; parking here would
+                            // suspend reply processing until an unrelated
+                            // subscription message wakes the task.
+                            cx.waker().wake_by_ref();
+                        }
+                        Poll::Pending => {}
                     }
-                    // Socket error or not ready - continue polling
 
                     // Register waker for subscription channel
                     // We need to wake up when new subscriptions arrive
