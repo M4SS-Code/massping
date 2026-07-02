@@ -36,12 +36,11 @@ impl BaseSocket {
     }
 
     pub(crate) fn recv(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<(usize, SocketAddr)> {
-        self.socket.recv_from(buf).map(|(filled, source)| {
-            (
-                filled,
-                source.as_socket().expect("SockAddr is an IP socket"),
-            )
-        })
+        let (filled, source) = self.socket.recv_from(buf)?;
+        let source = source
+            .as_socket()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "non-IP source address"))?;
+        Ok((filled, source))
     }
 
     pub(crate) fn send_to(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
