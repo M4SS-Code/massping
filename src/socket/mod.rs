@@ -20,7 +20,12 @@ impl Socket {
     pub(crate) fn new_icmp<V: IpVersion>() -> io::Result<Self> {
         let base = BaseSocket::new_icmp::<V>()?;
 
-        let fd = AsyncFd::new(base)?;
+        // SAFETY: `base` owns a valid, open socket fd for the entire lifetime
+        // of the `AsyncFd`; it is stored inside it and only dropped (closing
+        // the socket) when the `AsyncFd` itself is dropped. `BaseSocket::as_raw_fd`
+        // always returns that same fd, and we never call `get_mut` or `into_inner`,
+        // so the underlying socket can't be swapped out or closed early.
+        let fd = unsafe { AsyncFd::register(base) }?;
         Ok(Self { fd })
     }
 
